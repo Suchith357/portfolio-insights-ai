@@ -35,8 +35,8 @@ export function getStock(symbol: string): Stock | undefined {
 export function weeklyReturns(series: PricePoint[]): number[] {
   const out: number[] = [];
   for (let i = 1; i < series.length; i++) {
-    const prev = series[i - 1].close;
-    if (prev > 0) out.push(series[i].close / prev - 1);
+    const prev = series[i - 1]!.close;
+    if (prev > 0) out.push(series[i]!.close / prev - 1);
   }
   return out;
 }
@@ -62,8 +62,8 @@ export function maxDrawdown(series: PricePoint[]): number {
 function trailingReturn(series: PricePoint[], years: number): number | null {
   const weeks = Math.round(52 * years);
   if (series.length <= weeks) return null;
-  const start = series[series.length - 1 - weeks].close;
-  const end = series[series.length - 1].close;
+  const start = series[series.length - 1 - weeks]!.close;
+  const end = series[series.length - 1]!.close;
   if (start <= 0) return null;
   const total = end / start;
   return ((years === 1 ? total : Math.pow(total, 1 / years)) - 1) * 100;
@@ -80,9 +80,9 @@ export function correlation(a: number[], b: number[]): number | null {
   let dx = 0;
   let dy = 0;
   for (let i = 0; i < n; i++) {
-    num += (x[i] - mx) * (y[i] - my);
-    dx += (x[i] - mx) ** 2;
-    dy += (y[i] - my) ** 2;
+    num += (x[i]! - mx) * (y[i]! - my);
+    dx += (x[i]! - mx) ** 2;
+    dy += (y[i]! - my) ** 2;
   }
   if (dx === 0 || dy === 0) return null;
   return num / Math.sqrt(dx * dy);
@@ -219,8 +219,8 @@ export function computeMetrics(positions: Position[]): PortfolioMetrics {
   const sectorWeights = sectors.map((s) => s.pct / 100);
   const vols = priced.map((p) => getStockRiskProfile(p.symbol).volatilityPct);
   const dds = priced.map((p) => getStockRiskProfile(p.symbol).maxDrawdownPct);
-  const weightedVol = weights.reduce((s, w, i) => s + w * vols[i], 0);
-  const weightedDd = weights.reduce((s, w, i) => s + w * dds[i], 0);
+  const weightedVol = weights.reduce((s, w, i) => s + w * vols[i]!, 0);
+  const weightedDd = weights.reduce((s, w, i) => s + w * dds[i]!, 0);
   const topIdx = weights.indexOf(Math.max(...weights));
 
   return {
@@ -228,10 +228,10 @@ export function computeMetrics(positions: Position[]): PortfolioMetrics {
     totalInvested,
     pnl: totalValue - totalInvested,
     pnlPct: totalInvested > 0 ? ((totalValue - totalInvested) / totalInvested) * 100 : 0,
-    riskScore: riskScore(weightedVol, weights[topIdx], weightedDd),
+    riskScore: riskScore(weightedVol, weights[topIdx]!, weightedDd),
     diversificationScore: diversificationScore(weights, sectorWeights),
-    topConcentrationPct: weights[topIdx] * 100,
-    topConcentrationSymbol: priced[topIdx].symbol,
+    topConcentrationPct: weights[topIdx]! * 100,
+    topConcentrationSymbol: priced[topIdx]!.symbol,
     annualisedVolatilityPct: weightedVol,
     sectorAllocation: sectors,
     holdingCount: priced.length,
@@ -283,7 +283,7 @@ export function portfolioCorrelation(holdings: Holding[], symbol: string): numbe
   });
   const blended: number[] = [];
   for (let i = 0; i < n; i++) {
-    blended.push(series.reduce((s, arr, j) => s + weights[j] * arr[arr.length - n + i], 0));
+    blended.push(series.reduce((s, arr, j) => s + weights[j]! * arr[arr.length - n + i]!, 0));
   }
   return correlation(candidate.slice(-n), blended);
 }
@@ -416,7 +416,7 @@ export function portfolioValueSeries(holdings: Holding[], weeks = 52): PricePoin
     let total = 0;
     let date = "";
     for (const s of series) {
-      const p = s.points[s.points.length - i];
+      const p = s.points[s.points.length - i]!;
       total += p.close * s.qty;
       date = p.date;
     }

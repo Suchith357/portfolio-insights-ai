@@ -1,6 +1,6 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Eye, Inbox } from "lucide-react";
+import { Bell, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AiDisclaimer,
@@ -386,12 +386,6 @@ function DashboardPage() {
             </table>
           </div>
         </Panel>
-      )}
-
-      {metrics.holdingCount === 0 && (
-        <div className="hidden">
-          <Inbox />
-        </div>
       )}
     </div>
   );

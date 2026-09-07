@@ -10,33 +10,179 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as RegisterRouteImport } from './routes/register'
+import { Route as AppAdminRouteImport } from './routes/_app.admin'
+import { Route as AppAlertsRouteImport } from './routes/_app.alerts'
+import { Route as AppProfileRouteImport } from './routes/_app.profile'
+import { Route as AppWatchlistRouteImport } from './routes/_app.watchlist'
+import { Route as AppHoldingsIdRouteImport } from './routes/_app.holdings.$id'
+import { Route as AppPortfoliosIndexRouteImport } from './routes/_app.portfolios.index'
+import { Route as AppPortfoliosIdRouteImport } from './routes/_app.portfolios.$id'
+import { Route as AppStocksIndexRouteImport } from './routes/_app.stocks.index'
+import { Route as AppStocksSymbolRouteImport } from './routes/_app.stocks.$symbol'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RegisterRoute = RegisterRouteImport.update({
+  id: '/register',
+  path: '/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AppAdminRoute = AppAdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAlertsRoute = AppAlertsRouteImport.update({
+  id: '/alerts',
+  path: '/alerts',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProfileRoute = AppProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppWatchlistRoute = AppWatchlistRouteImport.update({
+  id: '/watchlist',
+  path: '/watchlist',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppHoldingsIdRoute = AppHoldingsIdRouteImport.update({
+  id: '/holdings/$id',
+  path: '/holdings/$id',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPortfoliosIndexRoute = AppPortfoliosIndexRouteImport.update({
+  id: '/portfolios/',
+  path: '/portfolios/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPortfoliosIdRoute = AppPortfoliosIdRouteImport.update({
+  id: '/portfolios/$id',
+  path: '/portfolios/$id',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppStocksIndexRoute = AppStocksIndexRouteImport.update({
+  id: '/stocks/',
+  path: '/stocks/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppStocksSymbolRoute = AppStocksSymbolRouteImport.update({
+  id: '/stocks/$symbol',
+  path: '/stocks/$symbol',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/register': typeof RegisterRoute
+  '/admin': typeof AppAdminRoute
+  '/alerts': typeof AppAlertsRoute
+  '/profile': typeof AppProfileRoute
+  '/watchlist': typeof AppWatchlistRoute
+  '/holdings/$id': typeof AppHoldingsIdRoute
+  '/portfolios/$id': typeof AppPortfoliosIdRoute
+  '/stocks/$symbol': typeof AppStocksSymbolRoute
+  '/portfolios/': typeof AppPortfoliosIndexRoute
+  '/stocks/': typeof AppStocksIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/login': typeof LoginRoute
+  '/register': typeof RegisterRoute
+  '/admin': typeof AppAdminRoute
+  '/alerts': typeof AppAlertsRoute
+  '/profile': typeof AppProfileRoute
+  '/watchlist': typeof AppWatchlistRoute
+  '/holdings/$id': typeof AppHoldingsIdRoute
+  '/portfolios/$id': typeof AppPortfoliosIdRoute
+  '/stocks/$symbol': typeof AppStocksSymbolRoute
+  '/portfolios': typeof AppPortfoliosIndexRoute
+  '/stocks': typeof AppStocksIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/_app': typeof AppRouteWithChildren
+  '/login': typeof LoginRoute
+  '/register': typeof RegisterRoute
+  '/_app/admin': typeof AppAdminRoute
+  '/_app/alerts': typeof AppAlertsRoute
+  '/_app/profile': typeof AppProfileRoute
+  '/_app/watchlist': typeof AppWatchlistRoute
+  '/_app/holdings/$id': typeof AppHoldingsIdRoute
+  '/_app/portfolios/$id': typeof AppPortfoliosIdRoute
+  '/_app/stocks/$symbol': typeof AppStocksSymbolRoute
+  '/_app/portfolios/': typeof AppPortfoliosIndexRoute
+  '/_app/stocks/': typeof AppStocksIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/register'
+    | '/admin'
+    | '/alerts'
+    | '/profile'
+    | '/watchlist'
+    | '/holdings/$id'
+    | '/portfolios/$id'
+    | '/stocks/$symbol'
+    | '/portfolios/'
+    | '/stocks/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/login'
+    | '/register'
+    | '/admin'
+    | '/alerts'
+    | '/profile'
+    | '/watchlist'
+    | '/holdings/$id'
+    | '/portfolios/$id'
+    | '/stocks/$symbol'
+    | '/portfolios'
+    | '/stocks'
+  id:
+    | '__root__'
+    | '/'
+    | '/_app'
+    | '/login'
+    | '/register'
+    | '/_app/admin'
+    | '/_app/alerts'
+    | '/_app/profile'
+    | '/_app/watchlist'
+    | '/_app/holdings/$id'
+    | '/_app/portfolios/$id'
+    | '/_app/stocks/$symbol'
+    | '/_app/portfolios/'
+    | '/_app/stocks/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AppRoute: typeof AppRouteWithChildren
+  LoginRoute: typeof LoginRoute
+  RegisterRoute: typeof RegisterRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +194,124 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/register': {
+      id: '/register'
+      path: '/register'
+      fullPath: '/register'
+      preLoaderRoute: typeof RegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/_app/admin': {
+      id: '/_app/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AppAdminRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/alerts': {
+      id: '/_app/alerts'
+      path: '/alerts'
+      fullPath: '/alerts'
+      preLoaderRoute: typeof AppAlertsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/profile': {
+      id: '/_app/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof AppProfileRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/watchlist': {
+      id: '/_app/watchlist'
+      path: '/watchlist'
+      fullPath: '/watchlist'
+      preLoaderRoute: typeof AppWatchlistRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/holdings/$id': {
+      id: '/_app/holdings/$id'
+      path: '/holdings/$id'
+      fullPath: '/holdings/$id'
+      preLoaderRoute: typeof AppHoldingsIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/portfolios/': {
+      id: '/_app/portfolios/'
+      path: '/portfolios'
+      fullPath: '/portfolios/'
+      preLoaderRoute: typeof AppPortfoliosIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/portfolios/$id': {
+      id: '/_app/portfolios/$id'
+      path: '/portfolios/$id'
+      fullPath: '/portfolios/$id'
+      preLoaderRoute: typeof AppPortfoliosIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/stocks/': {
+      id: '/_app/stocks/'
+      path: '/stocks'
+      fullPath: '/stocks/'
+      preLoaderRoute: typeof AppStocksIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/stocks/$symbol': {
+      id: '/_app/stocks/$symbol'
+      path: '/stocks/$symbol'
+      fullPath: '/stocks/$symbol'
+      preLoaderRoute: typeof AppStocksSymbolRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
+interface AppRouteChildren {
+  AppAdminRoute: typeof AppAdminRoute
+  AppAlertsRoute: typeof AppAlertsRoute
+  AppProfileRoute: typeof AppProfileRoute
+  AppWatchlistRoute: typeof AppWatchlistRoute
+  AppHoldingsIdRoute: typeof AppHoldingsIdRoute
+  AppPortfoliosIdRoute: typeof AppPortfoliosIdRoute
+  AppStocksSymbolRoute: typeof AppStocksSymbolRoute
+  AppPortfoliosIndexRoute: typeof AppPortfoliosIndexRoute
+  AppStocksIndexRoute: typeof AppStocksIndexRoute
+}
+
+const AppRouteChildren: AppRouteChildren = {
+  AppAdminRoute: AppAdminRoute,
+  AppAlertsRoute: AppAlertsRoute,
+  AppProfileRoute: AppProfileRoute,
+  AppWatchlistRoute: AppWatchlistRoute,
+  AppHoldingsIdRoute: AppHoldingsIdRoute,
+  AppPortfoliosIdRoute: AppPortfoliosIdRoute,
+  AppStocksSymbolRoute: AppStocksSymbolRoute,
+  AppPortfoliosIndexRoute: AppPortfoliosIndexRoute,
+  AppStocksIndexRoute: AppStocksIndexRoute,
+}
+
+const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AppRoute: AppRouteWithChildren,
+  LoginRoute: LoginRoute,
+  RegisterRoute: RegisterRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

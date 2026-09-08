@@ -348,10 +348,9 @@ function PortfoliosPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <SectionHeader
-        title=""
-        description="Values shown are computed from the synthetic demo dataset, not live market prices."
-      />
+      <p className="text-xs text-muted-foreground">
+        Values shown are computed from the synthetic demo dataset, not live market prices.
+      </p>
     </div>
   );
 }

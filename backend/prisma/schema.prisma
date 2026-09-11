@@ -1,0 +1,183 @@
+// PortfolioIQ — relational schema (3NF) for the existing `portfolioiq` PostgreSQL
+// database. Table and column names match the manually created database exactly,
+// so this schema maps onto it without renaming anything.
+//
+// CHECK constraints live in prisma/sql/constraints.sql (Prisma does not model
+// them). Derived financial values (P&L, risk score, diversification score,
+// returns) are NOT stored as columns — they are computed by the analytics layer.
+// `portfolio_analysis` is the only place derived values are persisted, and only
+// as point-in-time snapshots for history.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model users {
+  user_id       Int          @id @default(autoincrement())
+  name          String       @db.VarChar(100)
+  email         String       @unique @db.VarChar(255)
+  password_hash String       @db.VarChar(255)
+  role          String       @default("USER") @db.VarChar(20)
+  status        String       @default("ACTIVE") @db.VarChar(20)
+  created_at    DateTime     @default(now()) @db.Timestamp(6)
+  updated_at    DateTime     @default(now()) @updatedAt @db.Timestamp(6)
+  alerts        alerts[]
+  audit_logs    audit_logs[]
+  portfolios    portfolios[]
+  watchlists    watchlists[]
+
+  @@index([email], map: "idx_users_email")
+}
+
+model portfolios {
+  portfolio_id       Int                  @id @default(autoincrement())
+  user_id            Int
+  name               String               @db.VarChar(100)
+  description        String?
+  created_at         DateTime             @default(now()) @db.Timestamp(6)
+  updated_at         DateTime             @default(now()) @updatedAt @db.Timestamp(6)
+  alerts             alerts[]
+  holdings           holdings[]
+  portfolio_analysis portfolio_analysis[]
+  users              users                @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "portfolios_user_fk")
+  transactions       transactions[]
+
+  @@index([user_id], map: "idx_portfolios_user_id")
+}
+
+model stocks {
+  stock_id       Int            @id @default(autoincrement())
+  symbol         String         @db.VarChar(20)
+  company_name   String         @db.VarChar(150)
+  sector         String         @db.VarChar(100)
+  industry       String?        @db.VarChar(100)
+  exchange       String         @db.VarChar(20)
+  description    String?
+  market_cap     Decimal?       @db.Decimal(20, 2)
+  pe_ratio       Decimal?       @db.Decimal(10, 2)
+  dividend_yield Decimal?       @db.Decimal(8, 4)
+  is_active      Boolean        @default(true)
+  created_at     DateTime       @default(now()) @db.Timestamp(6)
+  updated_at     DateTime       @default(now()) @updatedAt @db.Timestamp(6)
+  alerts         alerts[]
+  holdings       holdings[]
+  stock_prices   stock_prices[]
+  transactions   transactions[]
+  watchlists     watchlists[]
+
+  @@unique([symbol, exchange], map: "stocks_symbol_exchange_unique")
+  @@index([sector], map: "idx_stocks_sector")
+  @@index([symbol], map: "idx_stocks_symbol")
+}
+
+model holdings {
+  holding_id        Int        @id @default(autoincrement())
+  portfolio_id      Int
+  stock_id          Int
+  quantity          Decimal    @db.Decimal(18, 4)
+  average_buy_price Decimal    @db.Decimal(18, 2)
+  created_at        DateTime   @default(now()) @db.Timestamp(6)
+  updated_at        DateTime   @default(now()) @updatedAt @db.Timestamp(6)
+  portfolios        portfolios @relation(fields: [portfolio_id], references: [portfolio_id], onDelete: Cascade, onUpdate: NoAction, map: "holdings_portfolio_fk")
+  stocks            stocks     @relation(fields: [stock_id], references: [stock_id], onUpdate: NoAction, map: "holdings_stock_fk")
+
+  @@unique([portfolio_id, stock_id], map: "holdings_portfolio_stock_unique")
+  @@index([portfolio_id], map: "idx_holdings_portfolio_id")
+  @@index([stock_id], map: "idx_holdings_stock_id")
+}
+
+model transactions {
+  transaction_id   Int        @id @default(autoincrement())
+  portfolio_id     Int
+  stock_id         Int
+  transaction_type String     @db.VarChar(10)
+  quantity         Decimal    @db.Decimal(18, 4)
+  price            Decimal    @db.Decimal(18, 2)
+  transaction_date DateTime   @db.Timestamp(6)
+  created_at       DateTime   @default(now()) @db.Timestamp(6)
+  portfolios       portfolios @relation(fields: [portfolio_id], references: [portfolio_id], onDelete: Cascade, onUpdate: NoAction, map: "transactions_portfolio_fk")
+  stocks           stocks     @relation(fields: [stock_id], references: [stock_id], onUpdate: NoAction, map: "transactions_stock_fk")
+
+  @@index([transaction_date], map: "idx_transactions_date")
+  @@index([portfolio_id], map: "idx_transactions_portfolio_id")
+  @@index([stock_id], map: "idx_transactions_stock_id")
+}
+
+model stock_prices {
+  price_id    Int      @id @default(autoincrement())
+  stock_id    Int
+  price_date  DateTime @db.Date
+  open_price  Decimal  @db.Decimal(18, 2)
+  high_price  Decimal  @db.Decimal(18, 2)
+  low_price   Decimal  @db.Decimal(18, 2)
+  close_price Decimal  @db.Decimal(18, 2)
+  volume      BigInt?
+  stocks      stocks   @relation(fields: [stock_id], references: [stock_id], onDelete: Cascade, onUpdate: NoAction, map: "stock_prices_stock_fk")
+
+  @@unique([stock_id, price_date], map: "stock_prices_stock_date_unique")
+  @@index([stock_id, price_date], map: "idx_stock_prices_stock_date")
+}
+
+model watchlists {
+  watchlist_id Int      @id @default(autoincrement())
+  user_id      Int
+  stock_id     Int
+  added_at     DateTime @default(now()) @db.Timestamp(6)
+  stocks       stocks   @relation(fields: [stock_id], references: [stock_id], onDelete: Cascade, onUpdate: NoAction, map: "watchlists_stock_fk")
+  users        users    @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "watchlists_user_fk")
+
+  @@unique([user_id, stock_id], map: "watchlists_user_stock_unique")
+  @@index([user_id], map: "idx_watchlists_user_id")
+}
+
+model alerts {
+  alert_id     Int         @id @default(autoincrement())
+  user_id      Int
+  portfolio_id Int?
+  stock_id     Int?
+  alert_type   String      @db.VarChar(50)
+  severity     String      @db.VarChar(20)
+  title        String      @db.VarChar(200)
+  message      String
+  is_read      Boolean     @default(false)
+  created_at   DateTime    @default(now()) @db.Timestamp(6)
+  portfolios   portfolios? @relation(fields: [portfolio_id], references: [portfolio_id], onDelete: Cascade, onUpdate: NoAction, map: "alerts_portfolio_fk")
+  stocks       stocks?     @relation(fields: [stock_id], references: [stock_id], onDelete: Cascade, onUpdate: NoAction, map: "alerts_stock_fk")
+  users        users       @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "alerts_user_fk")
+
+  @@index([user_id, is_read], map: "idx_alerts_user_read")
+}
+
+model portfolio_analysis {
+  analysis_id           Int        @id @default(autoincrement())
+  portfolio_id          Int
+  risk_score            Decimal    @db.Decimal(5, 2)
+  diversification_score Decimal    @db.Decimal(5, 2)
+  volatility            Decimal    @db.Decimal(10, 4)
+  max_drawdown          Decimal    @db.Decimal(10, 4)
+  return_1y             Decimal?   @db.Decimal(10, 4)
+  return_3y             Decimal?   @db.Decimal(10, 4)
+  return_5y             Decimal?   @db.Decimal(10, 4)
+  analyzed_at           DateTime   @default(now()) @db.Timestamp(6)
+  portfolios            portfolios @relation(fields: [portfolio_id], references: [portfolio_id], onDelete: Cascade, onUpdate: NoAction, map: "portfolio_analysis_portfolio_fk")
+
+  @@index([portfolio_id, analyzed_at], map: "idx_analysis_portfolio_date")
+}
+
+model audit_logs {
+  audit_id    Int      @id @default(autoincrement())
+  user_id     Int?
+  action      String   @db.VarChar(50)
+  entity_type String   @db.VarChar(50)
+  entity_id   Int?
+  details     String?
+  created_at  DateTime @default(now()) @db.Timestamp(6)
+  users       users?   @relation(fields: [user_id], references: [user_id], onUpdate: NoAction, map: "audit_logs_user_fk")
+
+  @@index([user_id], map: "idx_audit_logs_user_id")
+}

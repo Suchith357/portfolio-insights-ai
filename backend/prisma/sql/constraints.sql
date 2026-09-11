@@ -9,10 +9,6 @@ BEGIN
     ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('USER', 'ADMIN'));
   END IF;
 
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_status_check') THEN
-    ALTER TABLE users ADD CONSTRAINT users_status_check CHECK (status IN ('ACTIVE', 'SUSPENDED'));
-  END IF;
-
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'holdings_quantity_check') THEN
     ALTER TABLE holdings ADD CONSTRAINT holdings_quantity_check CHECK (quantity > 0);
   END IF;

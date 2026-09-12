@@ -64,6 +64,26 @@ export interface Transaction {
   executedAt: string;
 }
 
+export interface ImportRow {
+  symbol: string;
+  quantity: number;
+  price: number;
+  date?: string;
+}
+
+export interface ImportError {
+  row: number;
+  symbol: string | null;
+  reason: string;
+}
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  transactionsCreated: number;
+  errors: ImportError[];
+}
+
 export interface Portfolio {
   id: string;
   userId: string;
@@ -94,6 +114,8 @@ export interface Alert {
   summary: string;
   source: string;
   whyItMatters: string;
+  /** True once the user has acknowledged the alert. */
+  isRead?: boolean;
 }
 
 export interface AuditLogEntry {

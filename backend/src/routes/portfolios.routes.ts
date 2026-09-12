@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { validate } from "../middleware/validate.js";
 import * as portfolios from "../controllers/portfolio.controller.js";
 import * as analysis from "../controllers/analysis.controller.js";
+import * as imports from "../controllers/import.controller.js";
 
 const idParam = z.object({ id: z.coerce.number().int().positive() });
 
@@ -33,3 +34,17 @@ portfoliosRouter.delete("/:id", validate(idParam, "params"), portfolios.remove);
 portfoliosRouter.get("/:id/analysis", validate(idParam, "params"), analysis.portfolioAnalysis);
 /** Explicit snapshotting variant — also stores a portfolio_analysis row. */
 portfoliosRouter.post("/:id/analyze", validate(idParam, "params"), analysis.analyzeAndSnapshot);
+
+/** CSV holdings import — generic, no broker APIs. Per-row validation happens
+ * in the service so one bad row is skipped with an explicit reason instead of
+ * rejecting the whole file. */
+const importRowSchema = z.object({
+  symbol: z.string().trim().min(1).max(20),
+  quantity: z.coerce.number(),
+  price: z.coerce.number(),
+  date: z.string().optional(),
+});
+const importSchema = z.object({
+  rows: z.array(importRowSchema).min(1).max(500),
+});
+portfoliosRouter.post("/:id/import", validate(idParam, "params"), validate(importSchema), imports.importHoldings);

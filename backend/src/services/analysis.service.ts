@@ -14,6 +14,7 @@ import {
   type StockRiskProfile,
 } from "./analytics.service.js";
 import { explainBuySimulation, explainPortfolio, explainSellSimulation, type AiInsight } from "./ai.service.js";
+import { generateAlertsSafely } from "./alert-generation.service.js";
 
 export interface HoldingViewDto extends HoldingDto {
   stock: {
@@ -240,6 +241,11 @@ export async function analyzePortfolio(userId: number, portfolioId: number, pers
   const metrics = computeMetrics(positions, metaBySymbol, historyBySymbol);
   const insights = explainPortfolio(metrics);
   const valueSeries = portfolioValueSeries(positions, metaBySymbol, historyBySymbol);
+
+  // Analytical alert generation — deterministic, deduped against unread
+  // copies, and best-effort so it can never fail the analysis request.
+  const stockIdBySymbol = new Map(stocks.map((s) => [s.symbol, s.stock_id]));
+  await generateAlertsSafely(userId, portfolio.portfolio_id, metrics, stockIdBySymbol);
 
   // Point-in-time snapshot for the analysis history feature.
   const snapshot = persistSnapshot

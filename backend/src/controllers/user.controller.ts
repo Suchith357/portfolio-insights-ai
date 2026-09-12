@@ -12,3 +12,8 @@ export const updateProfile = asyncHandler(async (req, res) => {
   const result = await userService.updateProfile(currentUser(req).userId, req.body);
   ok(res, result);
 });
+
+export const changePassword = asyncHandler(async (req, res) => {
+  const result = await userService.changePassword(currentUser(req).userId, req.body);
+  ok(res, result);
+});

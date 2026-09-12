@@ -8,9 +8,10 @@
  * frontend analytics module is only used in offline demo mode.
  */
 import { buildHoldingViews, metricsForHoldings, portfolioValueSeries } from "@/lib/analytics";
-import type { Holding, Portfolio, PortfolioView, PricePoint, Transaction, TransactionType } from "@/types";
+import type { Holding, ImportResult, Portfolio, PortfolioView, PricePoint, Transaction, TransactionType } from "@/types";
 import { ApiError, USE_DEMO_DATA, apiRequest, delay } from "./api-client";
 import { db, nextId, persist } from "./demo-store";
+import { STOCKS } from "@/lib/demo-data";
 
 export async function listPortfolios(userId: string): Promise<Portfolio[]> {
   if (USE_DEMO_DATA) return delay(db().portfolios.filter((p) => p.userId === userId));
@@ -198,4 +199,40 @@ export async function deleteHolding(holdingId: string): Promise<void> {
     return;
   }
   await apiRequest<{ deleted: boolean }>(`/holdings/${holdingId}`, { method: "DELETE" });
+}
+
+/**
+ * CSV holdings import. The file is parsed client-side into typed rows; the
+ * backend re-validates every row and writes holdings + BUY transactions
+ * atomically. Invalid rows are skipped with explicit reasons.
+ */
+export async function importHoldings(portfolioId: string, rows: Array<{ symbol: string; quantity: number; price: number; date?: string }>): Promise<ImportResult> {
+  if (USE_DEMO_DATA) {
+    const store = db();
+    let imported = 0;
+    const errors: Array<{ row: number; symbol: string | null; reason: string }> = [];
+    rows.forEach((row, i) => {
+      const stock = STOCKS.find((s) => s.symbol === row.symbol.toUpperCase());
+      if (!stock || row.quantity <= 0 || row.price <= 0) {
+        errors.push({ row: i + 1, symbol: row.symbol || null, reason: !stock ? "Unknown symbol." : "Quantity and price must be greater than 0." });
+        return;
+      }
+      const holding = store.holdings.find((h) => h.portfolioId === portfolioId && h.symbol === stock.symbol);
+      if (holding) {
+        const totalQty = holding.quantity + row.quantity;
+        holding.avgBuyPrice = (holding.quantity * holding.avgBuyPrice + row.quantity * row.price) / totalQty;
+        holding.quantity = totalQty;
+      } else {
+        store.holdings.push({ id: nextId("hld"), portfolioId, symbol: stock.symbol, quantity: row.quantity, avgBuyPrice: row.price });
+      }
+      store.transactions.push({ id: nextId("txn"), portfolioId, symbol: stock.symbol, type: "BUY", quantity: row.quantity, price: row.price, executedAt: row.date ?? new Date().toISOString() });
+      imported += 1;
+    });
+    persist();
+    return delay({ imported, skipped: rows.length - imported, transactionsCreated: imported, errors });
+  }
+  return apiRequest<ImportResult>(`/portfolios/${portfolioId}/import`, {
+    method: "POST",
+    body: JSON.stringify({ rows }),
+  });
 }

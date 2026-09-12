@@ -18,11 +18,12 @@ import {
 import { CardsSkeleton, EmptyState, ErrorState } from "@/components/common/states";
 import { PriceAreaChart } from "@/components/charts/charts";
 import { formatCurrency, formatNumber, formatPct } from "@/lib/format";
-import { getPriceHistory } from "@/lib/demo-data";
 import { explainSellSimulation } from "@/lib/ai-insights";
+import { getPriceHistory } from "@/lib/demo-data";
 import { simulateSell } from "@/lib/analytics";
 import { USE_DEMO_DATA } from "@/services/api-client";
 import * as analysisService from "@/services/analysis.service";
+import * as stockService from "@/services/stock.service";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import * as portfolioService from "@/services/portfolio.service";
@@ -91,10 +92,17 @@ function HoldingAnalysisPage() {
   });
   const activeSimulation = USE_DEMO_DATA ? simulation : (serverSimulation.data ?? null);
 
-  const priceSeries = useMemo(
-    () => (holdingView ? getPriceHistory(holdingView.symbol).slice(-52) : []),
-    [holdingView],
-  );
+  // Price history comes from the backend stock_prices table via the API —
+  // the demo generator only covers its own 30-symbol universe.
+  const pricesQuery = useQuery({
+    queryKey: ["stock-prices", holdingView?.symbol],
+    queryFn: () => stockService.getStockPrices(holdingView!.symbol),
+    enabled: !!holdingView && !USE_DEMO_DATA,
+  });
+  const priceSeries = useMemo(() => {
+    if (USE_DEMO_DATA) return holdingView ? getPriceHistory(holdingView.symbol).slice(-52) : [];
+    return (pricesQuery.data ?? []).slice(-52);
+  }, [holdingView, pricesQuery.data]);
 
   if (holdingsQuery.isLoading || (holding && portfolioQuery.isLoading)) {
     return <CardsSkeleton count={4} />;

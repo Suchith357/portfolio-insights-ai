@@ -24,6 +24,7 @@ import {
 } from "@/components/common/data-display";
 import { PriceAreaChart } from "@/components/charts/charts";
 import { EmptyState, ErrorState, LoadingBlock } from "@/components/common/states";
+import { SectionHeader } from "@/components/common/data-display";
 import { formatCurrency, formatDate, formatPct } from "@/lib/format";
 import { explainBuySimulation } from "@/lib/ai-insights";
 import { cn } from "@/lib/utils";
@@ -70,6 +71,13 @@ function StockDetail() {
   const [portfolioId, setPortfolioId] = useState<string>("");
   const [amount, setAmount] = useState("50000");
   const [amountError, setAmountError] = useState<string | null>(null);
+
+  // Real BUY workflow (distinct from the simulation above it).
+  const [buyPortfolioId, setBuyPortfolioId] = useState("");
+  const [buyQty, setBuyQty] = useState("");
+  const [buyPrice, setBuyPrice] = useState("");
+  const [buyError, setBuyError] = useState<string | null>(null);
+  const [buySuccess, setBuySuccess] = useState<string | null>(null);
 
   const detail = useQuery({
     queryKey: ["stock", upper],
@@ -120,6 +128,57 @@ function StockDetail() {
     mutationFn: (value: number) =>
       analysisService.runBuySimulation(holdings, upper, value, activePortfolioId || undefined),
   });
+
+  const activeBuyPortfolioId = buyPortfolioId || portfolios.data?.[0]?.id || "";
+
+  function invalidateAfterTrade() {
+    void qc.invalidateQueries({ queryKey: ["portfolio-view"] });
+    void qc.invalidateQueries({ queryKey: ["portfolios"] });
+    void qc.invalidateQueries({ queryKey: ["dashboard"] });
+    void qc.invalidateQueries({ queryKey: ["transactions"] });
+    void qc.invalidateQueries({ queryKey: ["holdings"] });
+  }
+
+  const recordBuy = useMutation({
+    mutationFn: () =>
+      portfolioService.recordTransaction({
+        portfolioId: activeBuyPortfolioId,
+        symbol: upper,
+        type: "BUY",
+        quantity: Number(buyQty),
+        price: Number(buyPrice),
+        executedAt: new Date().toISOString(),
+      }),
+    onSuccess: () => {
+      setBuySuccess(`Recorded BUY of ${buyQty} ${upper} — the portfolio's holdings and analytics are updated.`);
+      setBuyQty("");
+      setBuyError(null);
+      invalidateAfterTrade();
+      window.setTimeout(() => setBuySuccess(null), 6000);
+    },
+    onError: (err: unknown) =>
+      setBuyError(err instanceof Error ? err.message : "We couldn't record this purchase."),
+  });
+
+  function submitBuy(e: React.FormEvent) {
+    e.preventDefault();
+    setBuyError(null);
+    const qty = Number(buyQty);
+    const price = Number(buyPrice);
+    if (!activeBuyPortfolioId) {
+      setBuyError("Create a portfolio first, then add this stock to it.");
+      return;
+    }
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setBuyError("Quantity must be a number greater than 0.");
+      return;
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      setBuyError("Price must be a number greater than 0.");
+      return;
+    }
+    recordBuy.mutate();
+  }
 
   const history = useMemo(() => {
     const all = detail.data?.history ?? [];
@@ -261,6 +320,82 @@ function StockDetail() {
             </dd>
           </div>
         </dl>
+      </section>
+
+      <section className="panel p-4">
+        <SectionHeader
+          title="Add to my portfolio"
+          description="Record a real BUY. This creates a transaction and updates the holding — the simulation above never does."
+        />
+        {portfolios.isLoading ? (
+          <div className="mt-3"><LoadingBlock label="Loading portfolios" /></div>
+        ) : !portfolios.data || portfolios.data.length === 0 ? (
+          <div className="mt-3">
+            <EmptyState
+              title="No portfolio yet"
+              description="Create a portfolio to add this stock to it."
+              action={
+                <Button asChild size="sm">
+                  <Link to="/portfolios">Go to portfolios</Link>
+                </Button>
+              }
+            />
+          </div>
+        ) : (
+          <form onSubmit={submitBuy} className="mt-3 grid gap-3 sm:grid-cols-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="buy-portfolio">Portfolio</Label>
+              <Select value={activeBuyPortfolioId} onValueChange={setBuyPortfolioId}>
+                <SelectTrigger id="buy-portfolio">
+                  <SelectValue placeholder="Select portfolio" />
+                </SelectTrigger>
+                <SelectContent>
+                  {portfolios.data.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="buy-qty">Quantity</Label>
+              <Input
+                id="buy-qty"
+                inputMode="decimal"
+                value={buyQty}
+                onChange={(e) => setBuyQty(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="buy-price">Buy price (₹)</Label>
+              <Input
+                id="buy-price"
+                inputMode="decimal"
+                placeholder={String(stock.lastPrice)}
+                value={buyPrice}
+                onChange={(e) => setBuyPrice(e.target.value)}
+              />
+            </div>
+            <div className="flex items-end">
+              <Button type="submit" className="w-full" disabled={recordBuy.isPending}>
+                {recordBuy.isPending ? "Recording…" : "Add to portfolio"}
+              </Button>
+            </div>
+            {(buyError || buySuccess) && (
+              <p
+                className={`sm:col-span-4 rounded-md border px-3 py-2 text-sm ${
+                  buyError
+                    ? "border-destructive/50 bg-destructive/10 text-destructive"
+                    : "border-gain/40 bg-gain/10 text-gain"
+                }`}
+                role="status"
+              >
+                {buyError ?? buySuccess}
+              </p>
+            )}
+          </form>
+        )}
       </section>
 
       <Tabs defaultValue="simulate">

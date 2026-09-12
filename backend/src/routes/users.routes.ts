@@ -13,8 +13,21 @@ const updateSchema = z
     message: "Provide a name or an email to update.",
   });
 
+const passwordSchema = z
+  .object({
+    currentPassword: z.string().min(1, "Enter your current password."),
+    newPassword: z
+      .string()
+      .min(8, "New password must be at least 8 characters.")
+      .max(72, "Password must be at most 72 characters."),
+  })
+  .refine((v) => v.currentPassword !== v.newPassword, {
+    message: "The new password must differ from the current one.",
+  });
+
 export const usersRouter = Router();
 
 usersRouter.use(requireAuth);
 usersRouter.get("/me", users.getProfile);
 usersRouter.patch("/me", validate(updateSchema), users.updateProfile);
+usersRouter.patch("/me/password", validate(passwordSchema), users.changePassword);

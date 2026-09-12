@@ -104,3 +104,9 @@ export async function listSectors(): Promise<string[]> {
   if (USE_DEMO_DATA) return [...new Set(STOCKS.map((s) => s.sector))].sort();
   return apiRequest<string[]>("/stocks/sectors");
 }
+
+/** Historical closing prices for one symbol (dataset data, not live quotes). */
+export async function getStockPrices(symbol: string): Promise<PricePoint[]> {
+  if (USE_DEMO_DATA) return getPriceHistory(symbol.toUpperCase());
+  return apiRequest<PricePoint[]>(`/stocks/${encodeURIComponent(symbol.toUpperCase())}/prices`);
+}

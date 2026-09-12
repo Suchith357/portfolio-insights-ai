@@ -1,13 +1,3 @@
-// PortfolioIQ — relational schema (3NF) for the existing `portfolioiq` PostgreSQL
-// database. Table and column names match the manually created database exactly,
-// so this schema maps onto it without renaming anything.
-//
-// CHECK constraints live in prisma/sql/constraints.sql (Prisma does not model
-// them). Derived financial values (P&L, risk score, diversification score,
-// returns) are NOT stored as columns — they are computed by the analytics layer.
-// `portfolio_analysis` is the only place derived values are persisted, and only
-// as point-in-time snapshots for history.
-
 generator client {
   provider = "prisma-client-js"
 }

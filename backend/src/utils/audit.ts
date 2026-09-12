@@ -2,6 +2,7 @@ import { prisma } from "./prisma.js";
 
 export type AuditAction =
   | "LOGIN"
+  | "LOGIN_FAILED"
   | "LOGOUT"
   | "REGISTER"
   | "PROFILE_UPDATE"

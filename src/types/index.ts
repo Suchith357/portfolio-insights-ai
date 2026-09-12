@@ -35,6 +35,8 @@ export interface Stock {
   lastPrice: number;
   previousClose: number;
   marketCapCr: number;
+  /** Analytics-engine risk profile computed from the dataset's price history. */
+  risk: StockRiskProfile;
 }
 
 export interface PricePoint {
@@ -76,6 +78,8 @@ export interface WatchlistItem {
   userId: string;
   symbol: string;
   addedAt: string;
+  /** Stock metadata + analytics risk, attached by the backend in API mode. */
+  stock?: Stock;
 }
 
 export type Severity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
@@ -106,6 +110,7 @@ export interface AuditLogEntry {
 
 export interface HoldingView extends Holding {
   stock: Stock;
+  risk: StockRiskProfile;
   invested: number;
   currentValue: number;
   pnl: number;

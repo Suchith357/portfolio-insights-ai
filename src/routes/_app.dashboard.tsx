@@ -14,7 +14,6 @@ import {
 } from "@/components/common/data-display";
 import { CardsSkeleton, EmptyState, ErrorState, LoadingBlock } from "@/components/common/states";
 import { AllocationBars, PriceAreaChart, SectorDonut } from "@/components/charts/charts";
-import { portfolioValueSeries } from "@/lib/analytics";
 import { offlineExplainer } from "@/lib/ai-insights";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
@@ -92,9 +91,11 @@ function DashboardPage() {
     );
   }
 
-  const { holdings, metrics, raw } = overview.data;
+  const { holdings, metrics } = overview.data;
+  // Insights and the value series are computed by the backend analytics engine
+  // (demo mode reproduces them client-side in the service layer).
   const insights = offlineExplainer.explainPortfolio(metrics);
-  const valueSeries = portfolioValueSeries(raw);
+  const valueSeries = overview.data.valueSeries;
   const topHoldings = [...holdings].sort((a, b) => b.allocationPct - a.allocationPct).slice(0, 8);
   const recentTransactions = (transactions.data ?? []).slice(0, 6);
   const topAlerts = (alerts.data ?? []).slice(0, 4);

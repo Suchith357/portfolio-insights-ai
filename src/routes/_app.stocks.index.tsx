@@ -15,7 +15,6 @@ import {
 import { DemoDataBadge } from "@/components/common/data-display";
 import { CardsSkeleton, EmptyState, ErrorState } from "@/components/common/states";
 import { formatCurrency, formatPct } from "@/lib/format";
-import { getStockRiskProfile } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
 import * as stockService from "@/services/stock.service";
 
@@ -46,7 +45,11 @@ function StocksPage() {
   const [sort, setSort] = useState<SortKey>("symbol");
   const [page, setPage] = useState(1);
 
-  const sectors = useMemo(() => stockService.listSectors(), []);
+  const sectorsQuery = useQuery({
+    queryKey: ["stocks", "sectors"],
+    queryFn: () => stockService.listSectors(),
+  });
+  const sectors = useMemo(() => sectorsQuery.data ?? [], [sectorsQuery.data]);
 
   const query = useQuery({
     queryKey: ["stocks", search, sector, sort, page],
@@ -149,7 +152,9 @@ function StocksPage() {
             {data.rows.map((s) => {
               const change = s.lastPrice - s.previousClose;
               const changePct = s.previousClose ? (change / s.previousClose) * 100 : 0;
-              const risk = getStockRiskProfile(s.symbol);
+              // Risk comes from the backend analytics engine over the dataset's
+              // price history (attached to each stock row).
+              const risk = s.risk;
               return (
                 <article key={s.id} className="panel flex flex-col gap-3 p-4">
                   <div className="flex items-start justify-between gap-2">

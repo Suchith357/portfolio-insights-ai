@@ -15,8 +15,15 @@ export function validate(schema: ZodTypeAny, source: Source = "body") {
       }));
       return next(badRequest("Some of the details you entered aren't valid.", details));
     }
-    if (source === "body") req.body = result.data;
-    else Object.defineProperty(req, source, { value: result.data, writable: true });
+    if (source === "body") {
+      req.body = result.data;
+    } else if (source === "query") {
+      // Express 5 getters are plain properties; this also keeps future
+      // middleware reading req.query consistent with the parsed values.
+      Object.defineProperty(req, "query", { value: result.data, writable: true, configurable: true });
+    } else {
+      Object.defineProperty(req, source, { value: result.data, writable: true, configurable: true });
+    }
     next();
   };
 }

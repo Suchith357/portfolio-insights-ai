@@ -17,6 +17,7 @@ import type {
   User,
   WatchlistItem,
 } from "@/types";
+import { annualisedVolatility, maxDrawdown, riskBand, trailingReturn } from "@/lib/stats";
 
 export const DEMO_DATA_NOTICE =
   "Demo data — synthetic prices and sample news for development only. Not live market data.";
@@ -95,6 +96,22 @@ const STOCK_SEEDS: StockSeed[] = [
   { symbol: "DLF", name: "DLF Limited", sector: "Infrastructure", price: 786, vol: 0.35, drift: 0.13, marketCapCr: 194000 },
 ];
 
+/** Risk profile for the synthetic demo series (same formulas as the backend engine). */
+function demoRiskProfile(symbol: string): Stock["risk"] {
+  const series = getPriceHistory(symbol);
+  const vol = annualisedVolatility(series);
+  return {
+    volatilityPct: vol,
+    maxDrawdownPct: maxDrawdown(series),
+    return1yPct: trailingReturn(series, 1),
+    return3yPct: trailingReturn(series, 3),
+    return5yPct: trailingReturn(series, 5),
+    riskBand: riskBand(vol),
+  };
+}
+
+const seedBySymbol = new Map(STOCK_SEEDS.map((s) => [s.symbol, s]));
+
 export const STOCKS: Stock[] = STOCK_SEEDS.map((s, i) => ({
   id: `stk_${i + 1}`,
   symbol: s.symbol,
@@ -105,9 +122,8 @@ export const STOCKS: Stock[] = STOCK_SEEDS.map((s, i) => ({
   lastPrice: s.price,
   previousClose: +(s.price * (1 - (mulberry32(hash(s.symbol))() - 0.5) * 0.03)).toFixed(2),
   marketCapCr: s.marketCapCr,
+  risk: demoRiskProfile(s.symbol),
 }));
-
-const seedBySymbol = new Map(STOCK_SEEDS.map((s) => [s.symbol, s]));
 
 /** 5 years of synthetic weekly closes, deterministic per symbol. */
 export function getPriceHistory(symbol: string): PricePoint[] {

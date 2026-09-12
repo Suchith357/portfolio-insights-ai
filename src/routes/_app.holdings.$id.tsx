@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,10 +18,11 @@ import {
 import { CardsSkeleton, EmptyState, ErrorState } from "@/components/common/states";
 import { PriceAreaChart } from "@/components/charts/charts";
 import { formatCurrency, formatNumber, formatPct } from "@/lib/format";
-import { getStockRiskProfile } from "@/lib/analytics";
 import { getPriceHistory } from "@/lib/demo-data";
 import { explainSellSimulation } from "@/lib/ai-insights";
 import { simulateSell } from "@/lib/analytics";
+import { USE_DEMO_DATA } from "@/services/api-client";
+import * as analysisService from "@/services/analysis.service";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import * as portfolioService from "@/services/portfolio.service";
@@ -76,8 +77,19 @@ function HoldingAnalysisPage() {
 
   const simulation = useMemo(() => {
     if (!view || !holdingView) return null;
+    // In API mode the sell simulation is computed by the backend analytics
+    // engine (read-only); sync computation here would duplicate it.
+    if (!USE_DEMO_DATA) return null;
     return simulateSell(view.holdings, id, pct);
   }, [view, holdingView, id, pct]);
+
+  const serverSimulation = useQuery({
+    queryKey: ["sell-simulation", id, pct],
+    queryFn: () => analysisService.runSellSimulation(view?.holdings ?? [], id, pct),
+    enabled: !USE_DEMO_DATA && !!view && !!holdingView,
+    placeholderData: keepPreviousData,
+  });
+  const activeSimulation = USE_DEMO_DATA ? simulation : (serverSimulation.data ?? null);
 
   const priceSeries = useMemo(
     () => (holdingView ? getPriceHistory(holdingView.symbol).slice(-52) : []),
@@ -101,7 +113,7 @@ function HoldingAnalysisPage() {
     );
   }
 
-  if (!holding || !holdingView || !view || !simulation) {
+  if (!holding || !holdingView || !view || !activeSimulation) {
     return (
       <EmptyState
         title="Holding not found"
@@ -115,10 +127,11 @@ function HoldingAnalysisPage() {
     );
   }
 
-  const risk = getStockRiskProfile(holdingView.symbol);
+  // Risk comes from the backend analytics engine over real dataset prices.
+  const risk = holdingView.risk;
   const sectorPct =
     view.metrics.sectorAllocation.find((s) => s.sector === holdingView.stock.sector)?.pct ?? 0;
-  const insight = explainSellSimulation(holdingView.symbol, pct, simulation);
+  const insight = explainSellSimulation(holdingView.symbol, pct, activeSimulation);
 
   return (
     <div className="space-y-6">
@@ -210,10 +223,10 @@ function HoldingAnalysisPage() {
             <span
               className={cn(
                 "rounded-full border px-3 py-1 text-xs font-semibold tracking-wide",
-                RECOMMENDATION_STYLES[simulation.recommendation],
+                RECOMMENDATION_STYLES[activeSimulation.recommendation],
               )}
             >
-              {simulation.recommendation}
+              {activeSimulation.recommendation}
             </span>
           }
         />
@@ -254,7 +267,7 @@ function HoldingAnalysisPage() {
         <div className="grid gap-4 sm:grid-cols-3">
           <StatCard
             label="Simulated proceeds"
-            value={formatCurrency(simulation.proceeds)}
+            value={formatCurrency(activeSimulation.proceeds)}
             sub={`${formatNumber((holdingView.quantity * pct) / 100, 2)} units`}
           />
           <div className="panel p-4">
@@ -262,7 +275,7 @@ function HoldingAnalysisPage() {
               Realised P&L if executed
             </p>
             <p className="mt-2 text-2xl font-semibold">
-              <PnlText value={simulation.realisedPnl} />
+              <PnlText value={activeSimulation.realisedPnl} />
             </p>
             <p className="mt-1 text-xs text-muted-foreground">Not booked — hypothetical only.</p>
           </div>
@@ -275,13 +288,13 @@ function HoldingAnalysisPage() {
 
         <div>
           <h3 className="mb-2 text-sm font-semibold">Before / after comparison</h3>
-          <DeltaTable deltas={simulation.deltas} />
+          <DeltaTable deltas={activeSimulation.deltas} />
         </div>
 
         <div className="space-y-3">
           <AiInsightCard insight={insight} />
           <ul className="space-y-1.5 text-sm text-muted-foreground">
-            {simulation.reasons.map((r) => (
+            {activeSimulation.reasons.map((r) => (
               <li key={r} className="flex gap-2">
                 <span className="text-primary">•</span>
                 <span>{r}</span>

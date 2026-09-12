@@ -117,7 +117,8 @@ function StockDetail() {
   );
 
   const simulation = useMutation({
-    mutationFn: (value: number) => analysisService.runBuySimulation(holdings, upper, value),
+    mutationFn: (value: number) =>
+      analysisService.runBuySimulation(holdings, upper, value, activePortfolioId || undefined),
   });
 
   const history = useMemo(() => {

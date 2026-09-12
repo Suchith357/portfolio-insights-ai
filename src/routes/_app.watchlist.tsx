@@ -152,8 +152,10 @@ function WatchlistPage() {
             </thead>
             <tbody>
               {watchlist.data.map((item) => {
-                const stock = getStock(item.symbol);
-                const risk = getStockRiskProfile(item.symbol);
+                // API mode: the backend attaches stock metadata + analytics risk.
+                // Demo mode: resolve from the in-browser dataset.
+                const stock = item.stock ?? getStock(item.symbol);
+                const risk = item.stock?.risk ?? getStockRiskProfile(item.symbol);
                 const change = stock ? stock.lastPrice - stock.previousClose : 0;
                 const changePct = stock && stock.previousClose ? (change / stock.previousClose) * 100 : 0;
                 const stockAlerts = (alerts.data ?? []).filter((a) => a.symbol === item.symbol);

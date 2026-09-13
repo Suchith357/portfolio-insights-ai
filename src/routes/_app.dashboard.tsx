@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
   AiDisclaimer,
   AiInsightCard,
-  DemoDataBadge,
+  MarketDataBadge,
   PnlText,
   ScoreMeter,
   SectionHeader,
@@ -14,7 +14,6 @@ import {
 } from "@/components/common/data-display";
 import { CardsSkeleton, EmptyState, ErrorState, LoadingBlock } from "@/components/common/states";
 import { AllocationBars, PriceAreaChart, SectorDonut } from "@/components/charts/charts";
-import { offlineExplainer } from "@/lib/ai-insights";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
 import * as portfolioService from "@/services/portfolio.service";
@@ -46,7 +45,7 @@ function DashboardPage() {
 
   const overview = useQuery({
     queryKey: ["dashboard", "overview", userId],
-    queryFn: () => portfolioService.getAggregateView(userId),
+    queryFn: () => portfolioService.getAggregateViewWithMeta(userId),
     enabled: !!userId,
   });
 
@@ -61,7 +60,7 @@ function DashboardPage() {
     enabled: !!userId,
   });
 
-  const symbols = overview.data?.holdings.map((h) => h.symbol) ?? [];
+  const symbols = overview.data?.view.holdings.map((h) => h.symbol) ?? [];
   const alerts = useQuery({
     queryKey: ["dashboard", "alerts", symbols.join(",")],
     queryFn: () => alertService.listAlertsForSymbols(symbols),
@@ -91,11 +90,12 @@ function DashboardPage() {
     );
   }
 
-  const { holdings, metrics } = overview.data;
-  // Insights and the value series are computed by the backend analytics engine
-  // (demo mode reproduces them client-side in the service layer).
-  const insights = offlineExplainer.explainPortfolio(metrics);
-  const valueSeries = overview.data.valueSeries;
+  const { holdings, metrics } = overview.data.view;
+  // The AI explanation layer runs server-side on the analytics engine's own
+  // output — the dashboard renders its insights verbatim, never recomputes.
+  const insights = overview.data.view.insights;
+  const freshness = overview.data.freshness;
+  const valueSeries = overview.data.view.valueSeries;
   const topHoldings = [...holdings].sort((a, b) => b.allocationPct - a.allocationPct).slice(0, 8);
   const recentTransactions = (transactions.data ?? []).slice(0, 6);
   const topAlerts = (alerts.data ?? []).slice(0, 4);
@@ -111,7 +111,7 @@ function DashboardPage() {
             A combined view of every portfolio in your workspace.
           </p>
         </div>
-        <DemoDataBadge className="sm:hidden" />
+        <MarketDataBadge freshness={freshness} className="sm:hidden" />
       </div>
 
       {metrics.holdingCount === 0 ? (
@@ -152,7 +152,11 @@ function DashboardPage() {
               label="Risk score"
               score={metrics.riskScore}
               betterWhenLower
-              hint={`Estimated annualised volatility ${metrics.annualisedVolatilityPct.toFixed(1)}% across the dataset.`}
+              hint={
+                metrics.annualisedVolatilityPct !== null
+                  ? `Portfolio-level annualised volatility ${metrics.annualisedVolatilityPct.toFixed(1)}% (date-aligned daily returns).`
+                  : "Insufficient price history — volatility is not estimated until more daily data accumulates."
+              }
             />
             <ScoreMeter
               label="Diversification score"
@@ -164,8 +168,12 @@ function DashboardPage() {
           <Panel>
             <SectionHeader
               title="Portfolio performance"
-              description="Value of current holdings across the last 52 weeks of dataset prices."
-              action={<DemoDataBadge className="hidden sm:inline-flex" />}
+              description={
+                valueSeries.length > 0
+                  ? `Reconstructed value of your current holdings from stored price history (${valueSeries[0]?.date} → ${valueSeries[valueSeries.length - 1]?.date}).`
+                  : "Value of current holdings across the stored price history."
+              }
+              action={<MarketDataBadge freshness={freshness} className="hidden sm:inline-flex" />}
             />
             <div className="mt-4">
               <PriceAreaChart data={valueSeries} height={260} />
@@ -274,7 +282,7 @@ function DashboardPage() {
           <Panel>
             <SectionHeader
               title="Alerts"
-              description="Sample risk and news events touching your holdings."
+              description="Automated analytics alerts generated from your portfolio's own figures."
               action={
                 <Button asChild variant="ghost" size="sm">
                   <Link to="/alerts">View all</Link>

@@ -1,4 +1,4 @@
-import type { Request, Response, NextFunction } from "express";
+import type { Request, Response } from "express";
 import { asyncHandler } from "../middleware/error.js";
 import { ok } from "../utils/http.js";
 import * as stockService from "../services/stock.service.js";
@@ -22,29 +22,19 @@ const asNumber = (v: unknown): number | undefined => {
 export const list = asyncHandler(async (req: Request, res: Response) => {
   const q = (req.query ?? {}) as StockQuery;
   const sector = asString(q.sector);
-  const result = await stockService.searchStocks({
+  const { result, meta } = await stockService.searchStocks({
     search: asString(q.search),
     sector: sector && sector !== "all" ? sector : undefined,
     sort: asString(q.sort),
     page: asNumber(q.page),
     pageSize: asNumber(q.pageSize),
   });
-  ok(res, result.rows, 200, {
-    total: result.total,
-    page: result.page,
-    pageSize: result.pageSize,
-    pageCount: result.pageCount,
-  });
+  ok(res, result.rows, 200, meta);
 });
 
 export const listSectors = asyncHandler(async (_req: Request, res: Response) => {
   const sectors = await stockService.listSectors();
   ok(res, sectors);
-});
-
-export const getOne = asyncHandler(async (req: Request, res: Response) => {
-  const stock = await stockService.getStockBySymbol(String(req.params["symbol"]));
-  ok(res, stock);
 });
 
 export const getDetail = asyncHandler(async (req: Request, res: Response) => {

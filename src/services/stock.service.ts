@@ -38,11 +38,11 @@ export async function searchStocks(query: StockQuery = {}): Promise<Paginated<St
         case "name":
           return a.name.localeCompare(b.name);
         case "price-desc":
-          return b.lastPrice - a.lastPrice;
+          return (b.lastPrice ?? -Infinity) - (a.lastPrice ?? -Infinity);
         case "price-asc":
-          return a.lastPrice - b.lastPrice;
+          return (a.lastPrice ?? Infinity) - (b.lastPrice ?? Infinity);
         case "mcap-desc":
-          return b.marketCapCr - a.marketCapCr;
+          return (b.marketCapCr ?? -Infinity) - (a.marketCapCr ?? -Infinity);
         default:
           return a.symbol.localeCompare(b.symbol);
       }
@@ -86,9 +86,15 @@ export async function getStockBySymbol(symbol: string): Promise<Stock> {
   return apiRequest<Stock>(`/stocks/${encodeURIComponent(symbol.toUpperCase())}`);
 }
 
-export async function getStockDetail(
-  symbol: string,
-): Promise<{ stock: Stock; history: PricePoint[]; risk: StockRiskProfile }> {
+export interface StockDetailResponse {
+  stock: Stock;
+  history: PricePoint[];
+  risk: StockRiskProfile;
+  /** Present on the backend response; absent in demo mode. */
+  freshness?: { lastPriceDate: string | null; dataSource: string };
+}
+
+export async function getStockDetail(symbol: string): Promise<StockDetailResponse> {
   if (USE_DEMO_DATA) {
     const stock = await getStockBySymbol(symbol);
     return {

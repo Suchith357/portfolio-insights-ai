@@ -23,7 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { DemoDataBadge } from "@/components/common/data-display";
+import { MarketDataBadge } from "@/components/common/data-display";
 import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
 import { initials } from "@/lib/format";
@@ -96,7 +96,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <NavLinks isAdmin={isAdmin} />
         </div>
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          Analytics are computed from a synthetic dataset for academic demonstration.
+          Analytics are computed from stored market data (Yahoo Finance sync).
         </p>
       </aside>
 
@@ -132,7 +132,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Brand />
           </div>
           <div className="ml-auto flex items-center gap-3">
-            <DemoDataBadge className="hidden sm:inline-flex" />
+            <MarketDataBadge className="hidden sm:inline-flex" />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button className="flex items-center gap-2 rounded-full p-0.5 outline-none focus-visible:ring-2 focus-visible:ring-ring">

@@ -9,7 +9,7 @@ import {
   AiDisclaimer,
   AiInsightCard,
   DeltaTable,
-  DemoDataBadge,
+  MarketDataBadge,
   PnlText,
   ScoreMeter,
   SectionHeader,
@@ -17,7 +17,7 @@ import {
 } from "@/components/common/data-display";
 import { CardsSkeleton, EmptyState, ErrorState } from "@/components/common/states";
 import { PriceAreaChart } from "@/components/charts/charts";
-import { formatCurrency, formatNumber, formatPct } from "@/lib/format";
+import { formatCurrency, formatCurrencyOrNull, formatNumber, formatPct } from "@/lib/format";
 import { explainSellSimulation } from "@/lib/ai-insights";
 import { getPriceHistory } from "@/lib/demo-data";
 import { simulateSell } from "@/lib/analytics";
@@ -161,14 +161,14 @@ function HoldingAnalysisPage() {
             <Badge variant="outline">Risk band: {risk.riskBand}</Badge>
           </div>
         </div>
-        <DemoDataBadge />
+        <MarketDataBadge />
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Current value"
           value={formatCurrency(holdingView.currentValue)}
-          sub={`${formatNumber(holdingView.quantity, 2)} units @ ${formatCurrency(holdingView.stock.lastPrice)}`}
+          sub={`${formatNumber(holdingView.quantity, 2)} units @ ${formatCurrencyOrNull(holdingView.stock.lastPrice)}`}
         />
         <StatCard
           label="Invested"
@@ -194,7 +194,7 @@ function HoldingAnalysisPage() {
           label="Portfolio risk score"
           score={view.metrics.riskScore}
           betterWhenLower
-          hint="Weighted volatility, concentration and drawdown exposure."
+          hint="Portfolio-level volatility, concentration and drawdown exposure."
         />
         <ScoreMeter
           label="Portfolio diversification"
@@ -205,12 +205,12 @@ function HoldingAnalysisPage() {
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Stock risk figures</p>
           <dl className="grid grid-cols-2 gap-2 text-sm">
             <dt className="text-muted-foreground">Volatility</dt>
-            <dd className="num text-right">{risk.volatilityPct.toFixed(1)}%</dd>
+            <dd className="num text-right">{risk.volatilityPct === null ? "N/A" : `${risk.volatilityPct.toFixed(1)}%`}</dd>
             <dt className="text-muted-foreground">Max drawdown</dt>
-            <dd className="num text-right text-loss">{risk.maxDrawdownPct.toFixed(1)}%</dd>
+            <dd className="num text-right text-loss">{risk.maxDrawdownPct === null ? "N/A" : `${risk.maxDrawdownPct.toFixed(1)}%`}</dd>
             <dt className="text-muted-foreground">1Y return</dt>
             <dd className="num text-right">{risk.return1yPct === null ? "—" : formatPct(risk.return1yPct)}</dd>
-            <dt className="text-muted-foreground">3Y return (p.a.)</dt>
+            <dt className="text-muted-foreground">3Y CAGR</dt>
             <dd className="num text-right">{risk.return3yPct === null ? "—" : formatPct(risk.return3yPct)}</dd>
           </dl>
         </div>

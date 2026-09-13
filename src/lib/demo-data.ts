@@ -107,6 +107,7 @@ function demoRiskProfile(symbol: string): Stock["risk"] {
     return3yPct: trailingReturn(series, 3),
     return5yPct: trailingReturn(series, 5),
     riskBand: riskBand(vol),
+    observations: series.length,
   };
 }
 
@@ -122,6 +123,11 @@ export const STOCKS: Stock[] = STOCK_SEEDS.map((s, i) => ({
   lastPrice: s.price,
   previousClose: +(s.price * (1 - (mulberry32(hash(s.symbol))() - 0.5) * 0.03)).toFixed(2),
   marketCapCr: s.marketCapCr,
+  peRatio: null,
+  dividendYield: null,
+  dataSource: "DEMO",
+  lastPriceDate: null,
+  fundamentalsUpdatedAt: null,
   risk: demoRiskProfile(s.symbol),
 }));
 
@@ -310,12 +316,12 @@ export const DEMO_ALERTS: Alert[] = [
 ];
 
 export const DEMO_AUDIT_LOG: AuditLogEntry[] = [
-  { id: "aud_1", actor: "user@portfolioiq.dev", action: "AUTH_LOGIN", entity: "Session", entityId: "sess_8891", createdAt: "2026-09-06T08:12:00Z", ip: "10.0.4.21" },
-  { id: "aud_2", actor: "user@portfolioiq.dev", action: "PORTFOLIO_CREATE", entity: "Portfolio", entityId: "pf_2", createdAt: "2026-09-06T08:15:00Z", ip: "10.0.4.21" },
-  { id: "aud_3", actor: "user@portfolioiq.dev", action: "TRANSACTION_CREATE", entity: "Transaction", entityId: "txn_12", createdAt: "2026-09-05T10:41:00Z", ip: "10.0.4.21" },
-  { id: "aud_4", actor: "admin@portfolioiq.dev", action: "USER_SUSPEND", entity: "User", entityId: "usr_10", createdAt: "2026-09-05T09:02:00Z", ip: "10.0.1.7" },
-  { id: "aud_5", actor: "admin@portfolioiq.dev", action: "STOCK_UPDATE", entity: "Stock", entityId: "stk_28", createdAt: "2026-09-04T16:28:00Z", ip: "10.0.1.7" },
-  { id: "aud_6", actor: "ananya@example.com", action: "WATCHLIST_ADD", entity: "WatchlistItem", entityId: "wl_31", createdAt: "2026-09-04T11:19:00Z", ip: "10.0.6.44" },
-  { id: "aud_7", actor: "rahul@example.com", action: "AUTH_LOGIN_FAILED", entity: "Session", entityId: "-", createdAt: "2026-09-03T19:55:00Z", ip: "10.0.9.12" },
-  { id: "aud_8", actor: "admin@portfolioiq.dev", action: "ROLE_UPDATE", entity: "User", entityId: "usr_7", createdAt: "2026-09-02T13:37:00Z", ip: "10.0.1.7" },
+  { id: "aud_1", actor: "user@portfolioiq.dev", action: "AUTH_LOGIN", entity: "Session", entityId: "sess_8891", createdAt: "2026-09-06T08:12:00Z" },
+  { id: "aud_2", actor: "user@portfolioiq.dev", action: "PORTFOLIO_CREATE", entity: "Portfolio", entityId: "pf_2", createdAt: "2026-09-06T08:15:00Z" },
+  { id: "aud_3", actor: "user@portfolioiq.dev", action: "TRANSACTION_CREATE", entity: "Transaction", entityId: "txn_12", createdAt: "2026-09-05T10:41:00Z" },
+  { id: "aud_4", actor: "admin@portfolioiq.dev", action: "USER_SUSPEND", entity: "User", entityId: "usr_10", createdAt: "2026-09-05T09:02:00Z" },
+  { id: "aud_5", actor: "admin@portfolioiq.dev", action: "STOCK_UPDATE", entity: "Stock", entityId: "stk_28", createdAt: "2026-09-04T16:28:00Z" },
+  { id: "aud_6", actor: "ananya@example.com", action: "WATCHLIST_ADD", entity: "WatchlistItem", entityId: "wl_31", createdAt: "2026-09-04T11:19:00Z" },
+  { id: "aud_7", actor: "rahul@example.com", action: "AUTH_LOGIN_FAILED", entity: "Session", entityId: "-", createdAt: "2026-09-03T19:55:00Z" },
+  { id: "aud_8", actor: "admin@portfolioiq.dev", action: "ROLE_UPDATE", entity: "User", entityId: "usr_7", createdAt: "2026-09-02T13:37:00Z" },
 ];

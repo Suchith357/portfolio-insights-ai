@@ -13,6 +13,8 @@ model users {
   email         String       @unique @db.VarChar(255)
   password_hash String       @db.VarChar(255)
   role          String       @default("USER") @db.VarChar(20)
+  /// JWTs issued before this instant are rejected (password-change invalidation).
+  password_changed_at DateTime? @db.Timestamp(6)
   created_at    DateTime     @default(now()) @db.Timestamp(6)
   updated_at    DateTime     @default(now()) @updatedAt @db.Timestamp(6)
   alerts        alerts[]
@@ -49,6 +51,12 @@ model stocks {
   pe_ratio       Decimal?       @db.Decimal(10, 2)
   dividend_yield Decimal?       @db.Decimal(8, 4)
   is_active      Boolean        @default(true)
+  /// Provider symbol used by the market-data refresh (e.g. RELIANCE.NS).
+  yahoo_symbol   String?        @db.VarChar(30)
+  /// Provenance of the master record: 'DEMO' (seeded sample) or 'YAHOO'.
+  data_source    String         @default("DEMO") @db.VarChar(20)
+  /// Last successful fundamentals (P/E, market cap, yield) refresh.
+  fundamentals_updated_at DateTime? @db.Timestamp(6)
   created_at     DateTime       @default(now()) @db.Timestamp(6)
   updated_at     DateTime       @default(now()) @updatedAt @db.Timestamp(6)
   alerts         alerts[]
@@ -104,10 +112,11 @@ model stock_prices {
   low_price   Decimal  @db.Decimal(18, 2)
   close_price Decimal  @db.Decimal(18, 2)
   volume      BigInt?
+  /// Provenance of this row: 'DEMO' (synthetic seed) or 'YAHOO' (real data).
+  data_source String   @default("DEMO") @db.VarChar(20)
   stocks      stocks   @relation(fields: [stock_id], references: [stock_id], onDelete: Cascade, onUpdate: NoAction, map: "stock_prices_stock_fk")
 
   @@unique([stock_id, price_date], map: "stock_prices_stock_date_unique")
-  @@index([stock_id, price_date], map: "idx_stock_prices_stock_date")
 }
 
 model watchlists {
@@ -154,6 +163,23 @@ model portfolio_analysis {
   portfolios            portfolios @relation(fields: [portfolio_id], references: [portfolio_id], onDelete: Cascade, onUpdate: NoAction, map: "portfolio_analysis_portfolio_fk")
 
   @@index([portfolio_id, analyzed_at], map: "idx_analysis_portfolio_date")
+}
+
+/// One row per market-data refresh run (scheduled or manual).
+model market_data_syncs {
+  sync_id              Int       @id @default(autoincrement())
+  started_at           DateTime  @default(now()) @db.Timestamp(6)
+  finished_at          DateTime? @db.Timestamp(6)
+  trigger_type         String    @default("SCHEDULED") @db.VarChar(20)
+  mode                 String    @default("LATEST") @db.VarChar(10)
+  status               String    @default("RUNNING") @db.VarChar(20)
+  stocks_processed     Int       @default(0)
+  prices_upserted      Int       @default(0)
+  fundamentals_updated Int       @default(0)
+  failures             Int       @default(0)
+  error_message        String?
+
+  @@index([finished_at(sort: Desc)], map: "idx_market_data_syncs_finished")
 }
 
 model audit_logs {

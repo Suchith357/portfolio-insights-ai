@@ -81,7 +81,7 @@ export function buildHoldingViews(holdings: Holding[]): HoldingView[] {
   const enriched = holdings
     .map((h) => {
       const stock = stockBySymbol.get(h.symbol);
-      if (!stock) return null;
+      if (!stock || stock.lastPrice === null) return null;
       const invested = h.quantity * h.avgBuyPrice;
       const currentValue = h.quantity * stock.lastPrice;
       return {
@@ -147,7 +147,7 @@ export function computeMetrics(positions: Position[]): PortfolioMetrics {
   const priced = positions
     .map((p) => {
       const stock = stockBySymbol.get(p.symbol);
-      if (!stock) return null;
+      if (!stock || stock.lastPrice === null) return null;
       return {
         symbol: p.symbol,
         value: p.quantity * stock.lastPrice,
@@ -166,11 +166,16 @@ export function computeMetrics(positions: Position[]): PortfolioMetrics {
       totalInvested,
       pnl: 0,
       pnlPct: 0,
-      riskScore: 0,
+      riskScore: null,
       diversificationScore: 0,
       topConcentrationPct: 0,
       topConcentrationSymbol: null,
-      annualisedVolatilityPct: 0,
+      annualisedVolatilityPct: null,
+      maxDrawdownPct: null,
+      return1yPct: null,
+      return3yPct: null,
+      return5yPct: null,
+      riskDataSufficient: false,
       sectorAllocation: [],
       holdingCount: 0,
     };
@@ -180,20 +185,26 @@ export function computeMetrics(positions: Position[]): PortfolioMetrics {
   const sectorWeights = sectors.map((s) => s.pct / 100);
   const vols = priced.map((p) => getStockRiskProfile(p.symbol).volatilityPct);
   const dds = priced.map((p) => getStockRiskProfile(p.symbol).maxDrawdownPct);
-  const weightedVol = weights.reduce((s, w, i) => s + w * vols[i]!, 0);
-  const weightedDd = weights.reduce((s, w, i) => s + w * dds[i]!, 0);
+  const weightedVol = weights.reduce((s, w, i) => s + w * (vols[i] ?? 0), 0);
+  const weightedDd = weights.reduce((s, w, i) => s + w * Math.abs(dds[i] ?? 0), 0);
   const topIdx = weights.indexOf(Math.max(...weights));
+  const riskDataSufficient = vols.every((v) => v !== null);
 
   return {
     totalValue,
     totalInvested,
     pnl: totalValue - totalInvested,
     pnlPct: totalInvested > 0 ? ((totalValue - totalInvested) / totalInvested) * 100 : 0,
-    riskScore: riskScore(weightedVol, weights[topIdx]!, weightedDd),
+    riskScore: riskDataSufficient ? riskScore(weightedVol, weights[topIdx]!, weightedDd) : null,
     diversificationScore: diversificationScore(weights, sectorWeights),
     topConcentrationPct: weights[topIdx]! * 100,
     topConcentrationSymbol: priced[topIdx]!.symbol,
-    annualisedVolatilityPct: weightedVol,
+    annualisedVolatilityPct: riskDataSufficient ? weightedVol : null,
+    maxDrawdownPct: dds.some((d) => d === null) ? null : weightedDd,
+    return1yPct: null,
+    return3yPct: null,
+    return5yPct: null,
+    riskDataSufficient,
     sectorAllocation: sectors,
     holdingCount: priced.length,
   };
@@ -240,7 +251,7 @@ export function portfolioCorrelation(holdings: Holding[], symbol: string): numbe
   if (n < 26) return null;
   const weights = holdings.map((h) => {
     const st = stockBySymbol.get(h.symbol);
-    return st ? (h.quantity * st.lastPrice) / metrics.totalValue : 0;
+    return st && st.lastPrice !== null ? (h.quantity * st.lastPrice) / metrics.totalValue : 0;
   });
   const blended: number[] = [];
   for (let i = 0; i < n; i++) {
@@ -253,7 +264,7 @@ export function portfolioCorrelation(holdings: Holding[], symbol: string): numbe
 export function simulateBuy(holdings: Holding[], symbol: string, amount: number): BuySimulationResult {
   const stock = stockBySymbol.get(symbol);
   const before = metricsForHoldings(holdings);
-  if (!stock || amount <= 0) {
+  if (!stock || stock.lastPrice === null || amount <= 0) {
     return { before, after: before, deltas: deltas(before, before), fitScore: 0, classification: "Poor Fit", reasons: [] };
   }
   const qty = amount / stock.lastPrice;
@@ -269,7 +280,7 @@ export function simulateBuy(holdings: Holding[], symbol: string, amount: number)
   const after = computeMetrics(positions);
 
   const divDelta = after.diversificationScore - before.diversificationScore;
-  const riskDelta = after.riskScore - before.riskScore;
+  const riskDelta = (after.riskScore ?? before.riskScore ?? 5) - (before.riskScore ?? 5);
   const sectorAfter = sectorExposure(after, stock.sector);
   const corr = portfolioCorrelation(holdings, symbol);
   const profile = getStockRiskProfile(symbol);
@@ -281,7 +292,7 @@ export function simulateBuy(holdings: Holding[], symbol: string, amount: number)
   score -= clamp(-2, 2, riskDelta / 3);
   score -= clamp(0, 2, (sectorAfter - 30) / 15);
   if (corr !== null) score += clamp(-1.5, 1.5, (0.5 - corr) * 2);
-  score -= clamp(0, 1.5, (profile.volatilityPct - 30) / 15);
+  if (profile.volatilityPct !== null) score -= clamp(0, 1.5, (profile.volatilityPct - 30) / 15);
   const fitScore = +clamp(0, 10, score).toFixed(1);
 
   const classification: FitClassification =
@@ -295,7 +306,7 @@ export function simulateBuy(holdings: Holding[], symbol: string, amount: number)
   );
   reasons.push(
     riskDelta > 0
-      ? `Portfolio risk score rises by ${riskDelta.toFixed(1)} points, largely from ${symbol}'s ${profile.volatilityPct.toFixed(1)}% historical volatility.`
+      ? `Portfolio risk score rises by ${riskDelta.toFixed(1)} points, largely from ${symbol}'s ${profile.volatilityPct === null ? "unavailable" : `${profile.volatilityPct.toFixed(1)}% historical`} volatility.`
       : `Portfolio risk score eases by ${Math.abs(riskDelta).toFixed(1)} points.`,
   );
   reasons.push(
@@ -316,7 +327,7 @@ export function simulateSell(holdings: Holding[], holdingId: string, pct: number
   const before = metricsForHoldings(holdings);
   const target = holdings.find((h) => h.id === holdingId);
   const stock = target ? stockBySymbol.get(target.symbol) : undefined;
-  if (!target || !stock) {
+  if (!target || !stock || stock.lastPrice === null) {
     return {
       before,
       after: before,
@@ -351,7 +362,7 @@ export function simulateSell(holdings: Holding[], holdingId: string, pct: number
   } else {
     reasons.push(`This position is ${weight.toFixed(1)}% of portfolio value, within a typical single-name weight.`);
   }
-  if (profile.volatilityPct > 32) {
+  if (profile.volatilityPct !== null && profile.volatilityPct > 32) {
     flags += 1;
     reasons.push(`Historical volatility of ${profile.volatilityPct.toFixed(1)}% is in the high band; current indicators suggest elevated risk.`);
   }
@@ -360,7 +371,7 @@ export function simulateSell(holdings: Holding[], holdingId: string, pct: number
     reasons.push(`${stock.sector} already accounts for ${sectorBefore.toFixed(1)}% of the portfolio.`);
   }
   reasons.push(
-    `Selling ${pct}% moves the risk score from ${before.riskScore.toFixed(1)} to ${after.riskScore.toFixed(1)} and diversification from ${before.diversificationScore.toFixed(1)} to ${after.diversificationScore.toFixed(1)}.`,
+    `Selling ${pct}% moves the risk score from ${before.riskScore === null ? "N/A" : before.riskScore.toFixed(1)} to ${after.riskScore === null ? "N/A" : after.riskScore.toFixed(1)} and diversification from ${before.diversificationScore.toFixed(1)} to ${after.diversificationScore.toFixed(1)}.`,
   );
 
   const recommendation = flags >= 3 ? "CONSIDER REDUCING" : flags >= 1 ? "REVIEW" : "HOLD";

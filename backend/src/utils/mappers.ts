@@ -27,6 +27,13 @@ export function toNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/** Numbers that may legitimately be missing stay null (never 0). */
+export function toNumberOrNull(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const n = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 export interface UserDto {
   id: string;
   name: string;
@@ -54,19 +61,48 @@ export interface StockDto {
   sector: string;
   exchange: string;
   currency: "INR";
-  lastPrice: number;
-  previousClose: number;
-  marketCapCr: number;
+  /** Latest stored close; null when the stock has no usable price rows (never 0). */
+  lastPrice: number | null;
+  /** Previous trading day's close; null when only one price row exists. */
+  previousClose: number | null;
+  marketCapCr: number | null;
   peRatio: number | null;
   dividendYield: number | null;
   description: string | null;
   industry: string | null;
   isActive: boolean;
+  /** Provenance of the latest price: 'DEMO' (synthetic) or 'YAHOO' (real). */
+  dataSource: string;
+  /** Date (YYYY-MM-DD) of the latest stored price; null when none exists. */
+  lastPriceDate: string | null;
+  /** When fundamentals (P/E, mcap, yield) were last refreshed; null = never. */
+  fundamentalsUpdatedAt: string | null;
 }
 
-export function toStockDto(s: StockRow, lastClose: unknown, prevClose: unknown): StockDto {
-  const last = toNumber(lastClose);
-  const prev = toNumber(prevClose, last);
+export function toStockDto(
+  s: {
+    stock_id: number;
+    symbol: string;
+    company_name: string;
+    sector: string;
+    exchange: string;
+    market_cap: unknown;
+    pe_ratio: unknown;
+    dividend_yield: unknown;
+    description: unknown;
+    industry: unknown;
+    is_active: boolean;
+    data_source?: string;
+    fundamentals_updated_at?: Date | null;
+  },
+  lastClose: unknown,
+  prevClose: unknown,
+  lastPriceDate: string | null = null,
+): StockDto {
+  const last = toNumberOrNull(lastClose);
+  // Previous close falls back to the latest only when it is genuinely absent
+  // (single price row) — positional logic, never "previous = latest" sentinel.
+  const prev = toNumberOrNull(prevClose) ?? last;
   return {
     id: String(s.stock_id),
     symbol: s.symbol,
@@ -76,20 +112,24 @@ export function toStockDto(s: StockRow, lastClose: unknown, prevClose: unknown):
     currency: "INR",
     lastPrice: last,
     previousClose: prev,
-    marketCapCr: s.market_cap === null ? 0 : toNumber(s.market_cap),
-    peRatio: s.pe_ratio === null ? null : toNumber(s.pe_ratio),
-    dividendYield: s.dividend_yield === null ? null : toNumber(s.dividend_yield),
-    description: s.description,
-    industry: s.industry,
+    marketCapCr: s.market_cap === null || s.market_cap === undefined ? null : toNumberOrNull(s.market_cap),
+    peRatio: s.pe_ratio === null || s.pe_ratio === undefined ? null : toNumberOrNull(s.pe_ratio),
+    dividendYield: s.dividend_yield === null || s.dividend_yield === undefined ? null : toNumberOrNull(s.dividend_yield),
+    description: s.description === null || s.description === undefined ? null : String(s.description),
+    industry: s.industry === null || s.industry === undefined ? null : String(s.industry),
     isActive: s.is_active,
+    dataSource: s.data_source ?? "DEMO",
+    lastPriceDate,
+    fundamentalsUpdatedAt: s.fundamentals_updated_at ? new Date(s.fundamentals_updated_at).toISOString() : null,
   };
 }
 
 /** Builds a minimal DTO when only the two latest closes are needed. */
 export function toStockDtoFromPrices(s: StockRow, prices: PriceRow[]): StockDto {
-  const latest = prices[0]?.close_price ?? 0;
-  const prev = prices[1]?.close_price ?? prices[0]?.close_price ?? 0;
-  return toStockDto(s, latest, prev);
+  const latest = prices[0]?.close_price ?? null;
+  const prev = prices[1]?.close_price ?? prices[0]?.close_price ?? null;
+  const lastPriceDate = prices[0]?.price_date ? prices[0].price_date.toISOString().slice(0, 10) : null;
+  return toStockDto(s, latest, prev, lastPriceDate);
 }
 
 export interface PortfolioDto {

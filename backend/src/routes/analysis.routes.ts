@@ -22,6 +22,7 @@ export const analysisRouter = Router();
 analysisRouter.use(requireAuth);
 
 analysisRouter.get("/overview", analysis.overview);
+analysisRouter.get("/market-freshness", analysis.marketFreshness);
 analysisRouter.get("/stock/:symbol", validate(symbolParam, "params"), analysis.stockRisk);
 analysisRouter.get("/correlation/:symbol", validate(symbolParam, "params"), analysis.correlation);
 analysisRouter.post("/buy-simulation", validate(buySchema), analysis.buySimulation);

@@ -24,7 +24,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { DemoDataBadge, PnlText, SectionHeader } from "@/components/common/data-display";
+import { MarketDataBadge, PnlText, SectionHeader } from "@/components/common/data-display";
 import { CardsSkeleton, EmptyState, ErrorState } from "@/components/common/states";
 import { Progress } from "@/components/ui/progress";
 import { formatCurrency, formatDate } from "@/lib/format";
@@ -151,7 +151,7 @@ function PortfoliosPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <DemoDataBadge className="hidden sm:inline-flex" />
+          <MarketDataBadge className="hidden sm:inline-flex" />
           <Button size="sm" onClick={openCreate}>
             <Plus className="mr-1.5 h-4 w-4" />
             Create portfolio
@@ -246,9 +246,11 @@ function PortfoliosPage() {
                       <div>
                         <div className="flex items-baseline justify-between text-xs">
                           <span className="text-muted-foreground">Risk score</span>
-                          <span className="num font-medium">{metrics.riskScore.toFixed(1)}/100</span>
+                          <span className="num font-medium">
+                            {metrics.riskScore === null ? "N/A" : `${metrics.riskScore.toFixed(1)}/100`}
+                          </span>
                         </div>
-                        <Progress value={metrics.riskScore} className="mt-1.5 h-1.5" />
+                        <Progress value={metrics.riskScore ?? 0} className="mt-1.5 h-1.5" />
                       </div>
                       <div>
                         <div className="flex items-baseline justify-between text-xs">
@@ -349,7 +351,7 @@ function PortfoliosPage() {
       </AlertDialog>
 
       <p className="text-xs text-muted-foreground">
-        Values shown are computed from the synthetic demo dataset, not live market prices.
+        Values are computed by the analytics engine from stored market prices and refresh with every market-data sync.
       </p>
     </div>
   );

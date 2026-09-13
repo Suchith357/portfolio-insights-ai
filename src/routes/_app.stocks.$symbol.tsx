@@ -18,14 +18,15 @@ import {
   AiDisclaimer,
   AiInsightCard,
   DeltaTable,
-  DemoDataBadge,
+  MarketDataBadge,
+  FreshnessBadge,
   SeverityBadge,
   StatCard,
 } from "@/components/common/data-display";
 import { PriceAreaChart } from "@/components/charts/charts";
 import { EmptyState, ErrorState, LoadingBlock } from "@/components/common/states";
 import { SectionHeader } from "@/components/common/data-display";
-import { formatCurrency, formatDate, formatPct } from "@/lib/format";
+import { formatCurrency, formatCurrencyOrNull, formatDate, formatPct } from "@/lib/format";
 import { explainBuySimulation } from "@/lib/ai-insights";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -191,17 +192,35 @@ function StockDetail() {
     return (
       <ErrorState
         title="We couldn't load that stock"
-        description="The symbol may not exist in the demo dataset."
+        description="The symbol may not exist in the catalogue."
         onRetry={() => detail.refetch()}
       />
     );
 
-  const { stock, risk } = detail.data;
-  const change = stock.lastPrice - stock.previousClose;
-  const changePct = stock.previousClose ? (change / stock.previousClose) * 100 : 0;
+  const { stock, risk, freshness } = detail.data;
+  const change = stock.lastPrice !== null && stock.previousClose !== null ? stock.lastPrice - stock.previousClose : null;
+  const changePct = change !== null && stock.previousClose ? (change / stock.previousClose) * 100 : null;
   const existing = holdings.find((h) => h.symbol === upper);
   const exposurePct = portfolioView.data?.holdings.find((h) => h.symbol === upper)?.allocationPct ?? 0;
   const correlation = holdings.length ? analysisService.correlationWithPortfolio(holdings, upper) : null;
+
+  // Data provenance: never claim "live" for synthetic rows. Yahoo = real;
+  // DEMO = synthetic; a stale real series says when it was last updated.
+  const isLive = (freshness?.dataSource ?? stock.dataSource) === "YAHOO";
+  const lastPriceDate = freshness?.lastPriceDate ?? stock.lastPriceDate ?? null;
+  const STALE_DAYS = 7;
+  const priceAgeDays = lastPriceDate
+    ? Math.floor((Date.now() - new Date(`${lastPriceDate}T00:00:00Z`).getTime()) / 86_400_000)
+    : null;
+  const isStale = isLive && (priceAgeDays === null || priceAgeDays > STALE_DAYS);
+  const sourceLabel = !isLive
+    ? "Synthetic weekly closes — demo dataset, not live quotes."
+    : isStale
+      ? `Live data (Yahoo Finance) · last price ${lastPriceDate} — stale, ${priceAgeDays ?? "unknown"} day(s) old; refresh pending.`
+      : `Live data · Yahoo Finance${lastPriceDate ? ` · last price ${lastPriceDate}` : ""}`;
+  const fundamentalsAge = stock.fundamentalsUpdatedAt
+    ? Math.floor((Date.now() - new Date(stock.fundamentalsUpdatedAt).getTime()) / 3_600_000)
+    : null;
 
   function runSimulation() {
     const value = Number(amount);
@@ -236,15 +255,21 @@ function StockDetail() {
           </div>
           <p className="mt-1 text-sm text-muted-foreground">{stock.name}</p>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="num text-3xl font-semibold">{formatCurrency(stock.lastPrice)}</span>
-            <span className={cn("num text-sm font-medium", change >= 0 ? "text-gain" : "text-loss")}>
-              {change >= 0 ? "+" : "−"}
-              {formatCurrency(Math.abs(change))} ({formatPct(changePct)})
+            <span className="num text-3xl font-semibold">{formatCurrencyOrNull(stock.lastPrice)}</span>
+            <span className={cn("num text-sm font-medium", change === null ? "text-muted-foreground" : change >= 0 ? "text-gain" : "text-loss")}>
+              {change === null ? "N/A" : (change >= 0 ? "+" : "−") + formatCurrency(Math.abs(change)) + " (" + formatPct(changePct ?? 0) + ")"}
             </span>
           </div>
         </div>
         <div className="flex flex-col items-end gap-2">
-          <DemoDataBadge />
+          {isLive ? (
+            <FreshnessBadge
+              syncedAt={stock.fundamentalsUpdatedAt ?? null}
+              status={isStale ? "stale" : "current"}
+            />
+          ) : (
+            <MarketDataBadge />
+          )}
           <Button
             variant={watchItem ? "secondary" : "outline"}
             size="sm"
@@ -257,27 +282,54 @@ function StockDetail() {
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Market cap" value={`₹${stock.marketCapCr.toLocaleString("en-IN")} Cr`} />
-        <StatCard label="Annualised volatility" value={`${risk.volatilityPct.toFixed(1)}%`} sub="5y weekly closes" />
-        <StatCard
-          label="Maximum drawdown"
-          value={`${risk.maxDrawdownPct.toFixed(1)}%`}
-          tone="loss"
-          sub="Worst peak-to-trough"
-        />
-        <StatCard
-          label="Your exposure"
-          value={exposurePct > 0 ? `${exposurePct.toFixed(1)}%` : "None"}
-          sub={existing ? `${existing.quantity} shares held` : "Not held in this portfolio"}
-        />
-      </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+  <StatCard
+    label="Market cap"
+    value={stock.marketCapCr === null ? "N/A" : `₹${stock.marketCapCr.toLocaleString("en-IN")} Cr`}
+  />
+  <StatCard
+    label="P/E ratio"
+    value={stock.peRatio === null ? "N/A" : `${stock.peRatio.toFixed(2)}×`}
+    sub="Price-to-earnings"
+  />
+  <StatCard
+    label="Dividend yield"
+    value={stock.dividendYield === null ? "N/A" : `${stock.dividendYield.toFixed(2)}%`}
+    sub="Annual dividend yield"
+  />
+  <StatCard
+    label="Annualised volatility"
+    value={risk.volatilityPct === null ? "N/A" : `${risk.volatilityPct.toFixed(1)}%`}
+    sub={risk.volatilityPct === null ? "Insufficient history" : "Weekly closes"}
+  />
+  <StatCard
+    label="Maximum drawdown"
+    value={risk.maxDrawdownPct === null ? "N/A" : `${risk.maxDrawdownPct.toFixed(1)}%`}
+    tone={risk.maxDrawdownPct === null ? "default" : "loss"}
+    sub="Worst peak-to-trough"
+  />
+  <StatCard
+    label="Your exposure"
+    value={exposurePct > 0 ? `${exposurePct.toFixed(1)}%` : "None"}
+    sub={existing ? `${existing.quantity} shares held` : "Not held in this portfolio"}
+  />
+</div>
 
       <section className="panel p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold">Price history</h2>
-            <p className="text-xs text-muted-foreground">Synthetic weekly closes — demo dataset, not live quotes.</p>
+            <p className="text-xs text-muted-foreground" data-testid="price-source-label">{sourceLabel}</p>
+            {isLive && (
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Fundamentals (P/E, market cap, yield) updated{" "}
+                {fundamentalsAge === null
+                  ? "never — unavailable for this stock"
+                  : fundamentalsAge < 1
+                    ? "within the last hour"
+                    : `${fundamentalsAge}h ago`}
+              </p>
+            )}
           </div>
           <div className="flex gap-1">
             {RANGES.map((r) => (
@@ -372,7 +424,7 @@ function StockDetail() {
               <Input
                 id="buy-price"
                 inputMode="decimal"
-                placeholder={String(stock.lastPrice)}
+                placeholder={stock.lastPrice === null ? "—" : String(stock.lastPrice)}
                 value={buyPrice}
                 onChange={(e) => setBuyPrice(e.target.value)}
               />
@@ -505,7 +557,7 @@ function StockDetail() {
           ) : !alerts.data || alerts.data.length === 0 ? (
             <EmptyState
               title="No alerts for this stock"
-              description="Sample events for this symbol will appear here when they exist in the demo dataset."
+              description="Analytics-derived alerts for this symbol will appear here once analysis runs create them."
             />
           ) : (
             <ul className="space-y-3">

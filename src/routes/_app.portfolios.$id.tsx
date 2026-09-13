@@ -24,7 +24,7 @@ import {
 import {
   AiDisclaimer,
   AiInsightCard,
-  DemoDataBadge,
+  MarketDataBadge,
   PnlText,
   ScoreMeter,
   SectionHeader,
@@ -33,7 +33,7 @@ import {
 import { CardsSkeleton, EmptyState, ErrorState, TableSkeleton } from "@/components/common/states";
 import { AllocationBars, SectorDonut } from "@/components/charts/charts";
 import { offlineExplainer } from "@/lib/ai-insights";
-import { formatCurrency, formatDate, formatDateTime } from "@/lib/format";
+import { formatCurrency, formatCurrencyOrNull, formatDate, formatDateTime } from "@/lib/format";
 import { parseHoldingsCsv, type ParsedCsvRow } from "@/lib/csv-import";
 import { useAuth } from "@/hooks/use-auth";
 import * as portfolioService from "@/services/portfolio.service";
@@ -549,7 +549,7 @@ function PortfolioDetail() {
   const dialogHoldings = (() => {
     const held = holdings.map((h) => ({
       symbol: h.symbol,
-      stock: { name: h.stock.name, lastPrice: h.stock.lastPrice },
+      stock: { name: h.stock.name, lastPrice: h.stock.lastPrice ?? 0 },
       quantity: h.quantity,
     }));
     const heldSymbols = new Set(held.map((h) => h.symbol));
@@ -582,7 +582,7 @@ function PortfolioDetail() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <DemoDataBadge />
+          <MarketDataBadge />
           <Button size="sm" onClick={() => setTxnOpen(true)}>
             <Plus className="mr-1.5 h-4 w-4" />
             Add stock / record trade
@@ -646,7 +646,11 @@ function PortfolioDetail() {
               label="Risk score"
               score={metrics.riskScore}
               betterWhenLower
-              hint={`Estimated annualised volatility ${metrics.annualisedVolatilityPct.toFixed(1)}% across the dataset.`}
+              hint={
+                metrics.annualisedVolatilityPct !== null
+                  ? `Portfolio-level annualised volatility ${metrics.annualisedVolatilityPct.toFixed(1)}% (date-aligned daily returns).`
+                  : "Insufficient price history — volatility is not estimated until more daily data accumulates."
+              }
             />
             <ScoreMeter
               label="Diversification score"
@@ -714,7 +718,7 @@ function PortfolioDetail() {
                         <td className="py-2 pr-3 text-muted-foreground">{h.stock.sector}</td>
                         <td className="num py-2 pr-3">{h.quantity}</td>
                         <td className="num py-2 pr-3">{formatCurrency(h.avgBuyPrice)}</td>
-                        <td className="num py-2 pr-3">{formatCurrency(h.stock.lastPrice)}</td>
+                        <td className="num py-2 pr-3">{formatCurrencyOrNull(h.stock.lastPrice)}</td>
                         <td className="num py-2 pr-3">{formatCurrency(h.currentValue)}</td>
                         <td className="py-2 pr-3">
                           <PnlText value={h.pnl} pct={h.pnlPct} />
@@ -861,7 +865,7 @@ function PortfolioDetail() {
 
       <TransactionDialog
         portfolioId={id}
-        holdings={dialogHoldings}
+        holdings={dialogHoldings as { symbol: string; stock: { name: string; lastPrice: number }; quantity: number }[]}
         open={txnOpen}
         onOpenChange={setTxnOpen}
         onDone={handleDone}

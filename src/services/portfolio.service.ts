@@ -9,9 +9,10 @@
  */
 import { buildHoldingViews, metricsForHoldings, portfolioValueSeries } from "@/lib/analytics";
 import type { Holding, ImportResult, Portfolio, PortfolioView, PricePoint, Transaction, TransactionType } from "@/types";
-import { ApiError, USE_DEMO_DATA, apiRequest, delay } from "./api-client";
+import { ApiError, USE_DEMO_DATA, apiRequest, apiRequestWithMeta, delay } from "./api-client";
 import { db, nextId, persist } from "./demo-store";
 import { STOCKS } from "@/lib/demo-data";
+import { offlineExplainer } from "@/lib/ai-insights";
 
 export async function listPortfolios(userId: string): Promise<Portfolio[]> {
   if (USE_DEMO_DATA) return delay(db().portfolios.filter((p) => p.userId === userId));
@@ -47,8 +48,8 @@ export async function getAllHoldings(userId: string): Promise<Holding[]> {
  * Dashboard aggregate view.
  *
  * API mode: the backend analytics engine computes everything from PostgreSQL —
- * including the 52-week value series (valueSeries), so the chart reflects real
- * dataset prices rather than the demo generator.
+ * metrics, the AI explanation layer (insights) and the value series — plus a
+ * `freshness` meta block describing the market-data sync state.
  * Demo mode: the same shapes are derived client-side from the demo store.
  */
 export interface AggregateView {
@@ -56,6 +57,28 @@ export interface AggregateView {
   metrics: ReturnType<typeof metricsForHoldings>;
   raw: Holding[];
   valueSeries: PricePoint[];
+  insights: ReturnType<typeof offlineExplainer.explainPortfolio>;
+}
+
+export interface AggregateViewWithMeta {
+  view: AggregateView;
+  freshness: {
+    lastSyncAt: string | null;
+    lastSyncStatus: string | null;
+    running: boolean;
+    dataSourceMix: { yahoo: number; demo: number };
+  } | null;
+}
+
+export async function getAggregateViewWithMeta(userId: string): Promise<AggregateViewWithMeta> {
+  if (USE_DEMO_DATA) {
+    const view = await getAggregateView(userId);
+    return { view, freshness: null };
+  }
+  const { data, meta } = await apiRequestWithMeta<AggregateView>("/analysis/overview");
+  if (!data) throw new ApiError("The portfolio analytics service didn't respond.", 502);
+  const freshness = (meta as { freshness?: AggregateViewWithMeta["freshness"] } | null)?.freshness ?? null;
+  return { view: data, freshness };
 }
 
 export async function getAggregateView(userId: string): Promise<AggregateView> {
@@ -66,6 +89,7 @@ export async function getAggregateView(userId: string): Promise<AggregateView> {
       metrics: metricsForHoldings(holdings),
       raw: holdings,
       valueSeries: portfolioValueSeries(holdings),
+      insights: offlineExplainer.explainPortfolio(metricsForHoldings(holdings)),
     };
   }
   return apiRequest<AggregateView>("/analysis/overview");

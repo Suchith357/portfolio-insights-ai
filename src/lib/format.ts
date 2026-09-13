@@ -51,3 +51,39 @@ export function initials(name: string) {
     .join("")
     .toUpperCase();
 }
+
+/**
+ * Renders a nullable financial figure without ever substituting zero for a
+ * missing value — unavailable data shows as "N/A".
+ */
+export function formatCurrencyOrNull(value: number | null | undefined, opts: { compact?: boolean } = {}) {
+  return value === null || value === undefined ? "N/A" : formatCurrency(value, opts);
+}
+
+export function formatPctOrNull(value: number | null | undefined, digits = 2) {
+  return value === null || value === undefined ? "N/A" : formatPct(value, digits);
+}
+
+export function formatNumberOrNull(value: number | null | undefined, digits = 2) {
+  return value === null || value === undefined ? "N/A" : formatNumber(value, digits);
+}
+
+/** Human-readable market-cap in ₹ crore; N/A when unknown. */
+export function formatMarketCap(cr: number | null | undefined) {
+  return cr === null || cr === undefined ? "N/A" : `₹${formatNumber(cr, 0)} Cr`;
+}
+
+/** Relative-age description of a data timestamp for freshness badges. */
+export function dataAge(iso: string | null | undefined): { label: string; stale: boolean; level: "current" | "recent" | "stale" | "none" } {
+  if (!iso) return { label: "No data yet", stale: true, level: "none" };
+  const ms = Date.now() - new Date(iso).getTime();
+  const hours = ms / 3_600_000;
+  const label =
+    hours < 1
+      ? "just now"
+      : hours < 24
+        ? `${Math.floor(hours)}h ago`
+        : `${Math.floor(hours / 24)}d ago`;
+  const level: "current" | "recent" | "stale" | "none" = hours < 2 ? "current" : hours < 26 ? "recent" : "stale";
+  return { label, stale: level !== "current", level };
+}

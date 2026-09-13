@@ -31,12 +31,24 @@ export interface Stock {
   sector: string;
   exchange: string;
   currency: "INR";
-  /** Latest price available in the demo dataset (not a live market quote). */
-  lastPrice: number;
-  previousClose: number;
-  marketCapCr: number;
+  /** Latest stored price; null when no usable price row exists — never 0. */
+  lastPrice: number | null;
+  previousClose: number | null;
+  /** Market cap in ₹ crore; null when the provider has no value — never 0. */
+  marketCapCr: number | null;
+  peRatio: number | null;
+  dividendYield: number | null;
   /** Analytics-engine risk profile computed from the dataset's price history. */
   risk: StockRiskProfile;
+  /** Provenance: 'DEMO' (synthetic seed) or 'YAHOO' (real market data). */
+  dataSource?: string;
+  /** Trading date of the latest stored price (YYYY-MM-DD); null = none. */
+  lastPriceDate?: string | null;
+  /** When fundamentals were last refreshed; null = never fetched. */
+  fundamentalsUpdatedAt?: string | null;
+  description?: string | null;
+  industry?: string | null;
+  isActive?: boolean;
 }
 
 export interface PricePoint {
@@ -125,7 +137,28 @@ export interface AuditLogEntry {
   entity: string;
   entityId: string;
   createdAt: string;
-  ip: string;
+  details?: string;
+}
+
+/** Market-data freshness envelope attached to catalogue/list responses. */
+export interface MarketDataMeta {
+  total: number;
+  page: number;
+  pageSize: number;
+  pageCount: number;
+  freshness?: {
+    lastSyncAt: string | null;
+    lastSyncStatus: string | null;
+    dataSourceMix: { yahoo: number; demo: number };
+  };
+}
+
+export interface SimulationDelta {
+  label: string;
+  before: number | null;
+  after: number | null;
+  unit: "score" | "pct" | "currency";
+  betterWhenLower?: boolean;
 }
 
 /* ---------- Analytics engine outputs (computed, never AI-generated) ---------- */
@@ -151,11 +184,22 @@ export interface PortfolioMetrics {
   totalInvested: number;
   pnl: number;
   pnlPct: number;
-  riskScore: number;
+  /** PortfolioIQ heuristic risk score; null when history is insufficient. */
+  riskScore: number | null;
   diversificationScore: number;
   topConcentrationPct: number;
   topConcentrationSymbol: string | null;
-  annualisedVolatilityPct: number;
+  /** Portfolio-level (not weighted-average) annualised volatility in %. */
+  annualisedVolatilityPct: number | null;
+  maxDrawdownPct: number | null;
+  /** 1Y simple return; 3Y/5Y are CAGR. null when history is short. */
+  return1yPct: number | null;
+  return3yPct: number | null;
+  return5yPct: number | null;
+  /** False when price history is too short for portfolio-level risk stats. */
+  riskDataSufficient?: boolean;
+  /** Provenance of the underlying prices: DEMO (synthetic) / YAHOO (real). */
+  dataSourceMix?: { demo: number; yahoo: number };
   sectorAllocation: SectorAllocation[];
   holdingCount: number;
 }
@@ -166,21 +210,55 @@ export interface PortfolioView {
   metrics: PortfolioMetrics;
 }
 
+export type RiskBand = "Low" | "Moderate" | "High" | "Very High" | "Insufficient Data";
+
 export interface StockRiskProfile {
-  volatilityPct: number;
-  maxDrawdownPct: number;
+  /** Annualised volatility in %; null when history is too short to estimate. */
+  volatilityPct: number | null;
+  maxDrawdownPct: number | null;
   return1yPct: number | null;
   return3yPct: number | null;
   return5yPct: number | null;
-  riskBand: "Low" | "Moderate" | "High" | "Very High";
+  riskBand: RiskBand;
+  /** Weekly observations behind this profile (min-sample gate). */
+  observations?: number;
 }
 
-export interface SimulationDelta {
-  label: string;
-  before: number;
-  after: number;
-  unit: "score" | "pct" | "currency";
-  betterWhenLower?: boolean;
+export interface AdminStats {
+  totalUsers: number;
+  userRoleUsers: number;
+  adminUsers: number;
+  totalPortfolios: number;
+  totalHoldings: number;
+  totalTransactions: number;
+  totalAlerts: number;
+  totalStocks: number;
+  stocksUsingRealData: number;
+  lastMarketDataSync: string | null;
+  lastMarketDataStatus: string | null;
+}
+
+export interface AdminUserQuery {
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface MarketDataSyncStatus {
+  running: boolean;
+  last: {
+    id: string;
+    triggerType: string;
+    mode: string;
+    status: string;
+    startedAt: string;
+    finishedAt: string | null;
+    stocksProcessed: number;
+    pricesUpserted: number;
+    fundamentalsUpdated: number;
+    failures: number;
+    errorMessage: string | null;
+  } | null;
 }
 
 export type FitClassification = "Strong Fit" | "Reasonable Fit" | "Weak Fit" | "Poor Fit";

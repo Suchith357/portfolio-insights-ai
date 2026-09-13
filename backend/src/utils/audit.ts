@@ -22,7 +22,8 @@ export type AuditAction =
   | "ALERT_READ"
   | "ANALYSIS_SNAPSHOT"
   | "ADMIN_USER_UPDATE"
-  | "ADMIN_STOCK_UPDATE";
+  | "ADMIN_STOCK_UPDATE"
+  | "MARKET_DATA_SYNC";
 
 /**
  * Best-effort audit trail. Never blocks or fails the originating request.

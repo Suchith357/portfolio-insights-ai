@@ -23,7 +23,10 @@ export interface AiProvider {
   explainPortfolio(metrics: PortfolioMetrics): AiInsight[];
 }
 
-function riskLanguage(score: number) {
+function riskLanguage(score: number | null, insufficient: boolean) {
+  if (insufficient || score === null) {
+    return "not yet measurable — the stored price history is too short for a reliable portfolio-level estimate";
+  }
   if (score < 30) return "conservative";
   if (score < 50) return "balanced";
   if (score < 70) return "growth-tilted";
@@ -44,12 +47,21 @@ export const offlineExplainer: AiProvider = {
     }
     const insights: AiInsight[] = [];
     const top = metrics.sectorAllocation[0];
+    const insufficient = metrics.riskDataSufficient === false || metrics.annualisedVolatilityPct === null;
 
-    insights.push({
-      title: `Risk profile reads as ${riskLanguage(metrics.riskScore)}`,
-      body: `The engine scores portfolio risk at ${metrics.riskScore.toFixed(1)}/100, driven by an estimated annualised volatility of ${metrics.annualisedVolatilityPct.toFixed(1)}% across ${metrics.holdingCount} positions. This is a description of historical behaviour in the dataset, not a forecast of future prices.`,
-      tone: metrics.riskScore > 65 ? "caution" : "neutral",
-    });
+    if (insufficient) {
+      insights.push({
+        title: "Risk statistics need more price history",
+        body: `PortfolioIQ can value your ${metrics.holdingCount} position${metrics.holdingCount === 1 ? "" : "s"} today, but the stored price history is too short to estimate portfolio-level volatility, drawdown or trailing returns reliably. Once the market-data refresh has accumulated more daily observations, risk and return figures will appear here. Insufficient data is reported as such — it is never treated as low risk.`,
+        tone: "neutral",
+      });
+    } else {
+      insights.push({
+        title: `Risk profile reads as ${riskLanguage(metrics.riskScore, false)}`,
+        body: `The engine scores portfolio risk at ${metrics.riskScore!.toFixed(1)}/100, driven by an estimated annualised volatility of ${metrics.annualisedVolatilityPct!.toFixed(1)}% across ${metrics.holdingCount} positions. This is a description of historical behaviour in the dataset, not a forecast of future prices.`,
+        tone: metrics.riskScore !== null && metrics.riskScore > 65 ? "caution" : "neutral",
+      });
+    }
 
     insights.push({
       title:
@@ -71,7 +83,10 @@ export const offlineExplainer: AiProvider = {
 };
 
 export function explainBuySimulation(symbol: string, amount: number, result: BuySimulationResult): AiInsight {
-  const dir = result.after.riskScore >= result.before.riskScore ? "increases" : "reduces";
+  const dir =
+    result.after.riskScore !== null && result.before.riskScore !== null && result.after.riskScore >= result.before.riskScore
+      ? "increases"
+      : "reduces";
   return {
     title: `${result.classification} — fit score ${result.fitScore.toFixed(1)}/10`,
     body: `Adding roughly ${amount.toLocaleString("en-IN")} of ${symbol} ${dir} measured portfolio risk and shifts diversification to ${result.after.diversificationScore.toFixed(1)}/100. ${result.reasons.join(" ")} These are historical, portfolio-relative indicators — they do not predict future returns.`,

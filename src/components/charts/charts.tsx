@@ -24,13 +24,26 @@ const CHART_COLORS = [
   "var(--color-chart-6)",
 ];
 
+/**
+ * Shared tooltip styling — dark popover surface with high-contrast text.
+ * Applied to every chart in the app via this single object; labels and values
+ * both use popover-foreground so nothing renders in a low-contrast grey.
+ */
 const tooltipStyle = {
   backgroundColor: "var(--color-popover)",
   border: "1px solid var(--color-border)",
   borderRadius: "8px",
   fontSize: "12px",
   color: "var(--color-popover-foreground)",
-};
+  boxShadow: "0 4px 16px rgba(0,0,0,0.45)",
+} as const;
+
+/** Shared label/value renderer so tooltip text never falls back to theme grey. */
+const tooltipItemStyle = { color: "var(--color-popover-foreground)" } as const;
+
+function TooltipLabel(label: unknown) {
+  return <span style={tooltipItemStyle}>{String(label)}</span>;
+}
 
 export function PriceAreaChart({
   data,
@@ -68,6 +81,8 @@ export function PriceAreaChart({
         />
         <Tooltip
           contentStyle={tooltipStyle}
+          itemStyle={tooltipItemStyle}
+          labelStyle={tooltipItemStyle}
           formatter={(v: number) => [formatCurrency(v), "Close"]}
           labelFormatter={(l: string) => l}
         />
@@ -88,6 +103,8 @@ export function SectorDonut({ data, height = 260 }: { data: SectorAllocation[]; 
         </Pie>
         <Tooltip
           contentStyle={tooltipStyle}
+          itemStyle={tooltipItemStyle}
+          labelStyle={tooltipItemStyle}
           formatter={(v: number, n: string) => [formatCurrency(v, { compact: true }), n]}
         />
         <Legend
@@ -122,6 +139,8 @@ export function AllocationBars({
         <Tooltip
           cursor={{ fill: "var(--color-accent)", opacity: 0.3 }}
           contentStyle={tooltipStyle}
+          itemStyle={tooltipItemStyle}
+          labelStyle={tooltipItemStyle}
           formatter={(v: number) => [`${v.toFixed(1)}%`, "Allocation"]}
         />
         <Bar dataKey="value" radius={[0, 4, 4, 0]}>

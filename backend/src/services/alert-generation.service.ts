@@ -31,12 +31,14 @@ export function deriveAlerts(metrics: PortfolioMetrics, stockIdBySymbol: Map<str
     });
   }
 
-  if (metrics.riskScore > 65) {
+  // Risk alerts only when the sample is sufficient — insufficient data never
+  // escalates to an alert.
+  if (metrics.riskScore !== null && metrics.riskScore > 65) {
     alerts.push({
       alert_type: "HIGH_RISK",
       severity: metrics.riskScore > 80 ? "HIGH" : "MEDIUM",
       title: `Portfolio risk score is ${metrics.riskScore.toFixed(1)}/100`,
-      message: `The analytics engine rates this portfolio ${metrics.riskScore > 80 ? "very high" : "high"} risk, driven by an estimated annualised volatility of ${metrics.annualisedVolatilityPct.toFixed(1)}%. This describes historical behaviour of the dataset, not a forecast.`,
+      message: `The analytics engine rates this portfolio ${metrics.riskScore > 80 ? "very high" : "high"} risk, driven by an estimated annualised volatility of ${(metrics.annualisedVolatilityPct ?? 0).toFixed(1)}%. This describes historical behaviour of the dataset, not a forecast.`,
       stock_id: null,
     });
   }

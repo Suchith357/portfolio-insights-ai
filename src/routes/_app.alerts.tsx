@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DemoDataBadge, SeverityBadge } from "@/components/common/data-display";
+import { MarketDataBadge, SeverityBadge } from "@/components/common/data-display";
 import { CardsSkeleton, EmptyState, ErrorState } from "@/components/common/states";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -28,10 +28,10 @@ export const Route = createFileRoute("/_app/alerts")({
       {
         name: "description",
         content:
-          "Sample risk and news events for the demo stock universe, ranked by severity and matched to your holdings.",
+          "Automated risk and diversification alerts generated from your portfolio's own analytics, ranked by severity.",
       },
       { property: "og:title", content: "Alerts — PortfolioIQ" },
-      { property: "og:description", content: "Severity-ranked sample events affecting the stocks you hold." },
+      { property: "og:description", content: "Severity-ranked automated alerts derived from your portfolio analytics." },
     ],
   }),
   component: AlertsPage,
@@ -132,7 +132,7 @@ function AlertsPage() {
             <CheckCheck className="mr-1.5 h-4 w-4" />
             {markAllRead.isPending ? "Marking…" : `Mark all read (${unreadCount})`}
           </Button>
-          <DemoDataBadge />
+          <MarketDataBadge />
         </div>
       </div>      <div className="panel flex flex-wrap items-center justify-between gap-3 p-4">
         <label className="flex items-center gap-2 text-sm">
@@ -177,7 +177,7 @@ function AlertsPage() {
             <SelectValue placeholder="Scope" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All demo stocks</SelectItem>
+            <SelectItem value="all">All stocks</SelectItem>
             <SelectItem value="holdings">Only stocks I hold</SelectItem>
           </SelectContent>
         </Select>
@@ -194,7 +194,7 @@ function AlertsPage() {
       ) : rows.length === 0 ? (
         <EmptyState
           title="No alerts match these filters"
-          description="Clear the filters to see every sample event in the demo dataset."
+          description="Clear the filters to see every alert generated for your portfolios."
           icon={<BellOff className="h-5 w-5" />}
           action={
             <Button
@@ -272,7 +272,8 @@ function AlertsPage() {
       )}
 
       <p className="text-xs text-muted-foreground">
-        Alerts are synthetic sample events used for development. They are not live news and are not investment advice.
+        Alerts are generated automatically by the analytics engine from your own portfolio figures. They are not live
+        news and are not investment advice.
       </p>
     </div>
   );

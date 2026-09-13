@@ -2,6 +2,7 @@ import { asyncHandler } from "../middleware/error.js";
 import { currentUser } from "../middleware/auth.js";
 import { ok } from "../utils/http.js";
 import * as analysisService from "../services/analysis.service.js";
+import { marketDataFreshness } from "../services/market-data.sync.js";
 
 /** GET /api/portfolios/:id/analysis — computed metrics (read-only view). */
 export const portfolioAnalysis = asyncHandler(async (req, res) => {
@@ -17,8 +18,19 @@ export const analyzeAndSnapshot = asyncHandler(async (req, res) => {
 
 /** GET /api/analysis/overview — aggregate metrics across all user portfolios. */
 export const overview = asyncHandler(async (req, res) => {
-  const result = await analysisService.getAggregateMetrics(currentUser(req).userId);
-  ok(res, result);
+  const [result, freshness] = await Promise.all([
+    analysisService.getAggregateMetrics(currentUser(req).userId),
+    marketDataFreshness(),
+  ]);
+  ok(res, result, 200, { freshness });
+});
+
+/**
+ * GET /api/analysis/market-freshness — platform-wide market-data freshness
+ * for the global header badge. Lightweight (three indexed lookups).
+ */
+export const marketFreshness = asyncHandler(async (req, res) => {
+  ok(res, await marketDataFreshness());
 });
 
 /** GET /api/analysis/stock/:symbol — standalone stock risk profile. */

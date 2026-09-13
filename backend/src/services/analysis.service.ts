@@ -1,4 +1,5 @@
 import { prisma } from "../utils/prisma.js";
+import { latestHomogeneousSegment } from "./analytics.service.js";
 import { notFound } from "../utils/http.js";
 import { recordAudit } from "../utils/audit.js";
 import { toHoldingDto, type HoldingDto } from "../utils/mappers.js";
@@ -26,7 +27,7 @@ export interface HoldingViewDto extends HoldingDto {
     currency: "INR";
     lastPrice: number;
     previousClose: number;
-    marketCapCr: number;
+    marketCapCr: number | null;
   };
   risk: StockRiskProfile;
   invested: number;
@@ -67,8 +68,8 @@ export interface BuySimulationResult {
   after: PortfolioMetrics;
   deltas: Array<{
     label: string;
-    before: number;
-    after: number;
+    before: number | null;
+    after: number | null;
     unit: "score" | "pct" | "currency";
     betterWhenLower?: boolean;
   }>;
@@ -122,17 +123,27 @@ async function buildMarketData(symbols: string[]) {
     ? await prisma.stock_prices.findMany({
         where: { stock_id: { in: [...stockIdToSymbol.keys()] } },
         orderBy: [{ stock_id: "asc" }, { price_date: "asc" }],
-        select: { stock_id: true, price_date: true, close_price: true },
+        select: { stock_id: true, price_date: true, close_price: true, data_source: true },
       })
     : [];
 
   const historyBySymbol = new Map<string, PricePoint[]>();
+  const sourceBySymbol = new Map<string, Map<string, string>>();
   for (const p of prices) {
     const symbol = stockIdToSymbol.get(p.stock_id);
     if (!symbol) continue;
     const arr = historyBySymbol.get(symbol) ?? [];
     arr.push({ date: p.price_date.toISOString().slice(0, 10), close: Number(p.close_price) });
     historyBySymbol.set(symbol, arr);
+    const srcMap = sourceBySymbol.get(symbol) ?? new Map<string, string>();
+    srcMap.set(p.price_date.toISOString().slice(0, 10), p.data_source);
+    sourceBySymbol.set(symbol, srcMap);
+  }
+  // Mixed-provenance guard: synthetic weekly DEMO bars followed by real daily
+  // YAHOO bars must never be blended — the junction fabricates returns. Keep
+  // only each series' latest homogeneous segment (YAHOO when present).
+  for (const [symbol, series] of historyBySymbol) {
+    historyBySymbol.set(symbol, latestHomogeneousSegment(series, sourceBySymbol.get(symbol)));
   }
 
   // lastPrice / previousClose come from the tail of each series.
@@ -146,6 +157,9 @@ async function buildMarketData(symbols: string[]) {
       symbol: s.symbol,
       sector: s.sector,
       lastPrice: last,
+      previousClose: prev,
+      dataSource: s.data_source,
+      lastPriceDate: series.length > 0 ? (series[series.length - 1]?.date ?? null) : null,
     });
   }
 
@@ -198,7 +212,7 @@ function buildHoldingViews(
         currency: "INR" as const,
         lastPrice: prices.last,
         previousClose: prices.prev,
-        marketCapCr: Number(h.stocks.market_cap ?? 0),
+        marketCapCr: h.stocks.market_cap === null || h.stocks.market_cap === undefined ? null : Number(h.stocks.market_cap),
       },
       invested,
       currentValue,
@@ -208,12 +222,13 @@ function buildHoldingViews(
       risk: series.length >= 2
         ? getStockRiskProfileFromSeries(series)
         : {
-            volatilityPct: 0,
-            maxDrawdownPct: 0,
+            volatilityPct: null,
+            maxDrawdownPct: null,
             return1yPct: null,
             return3yPct: null,
             return5yPct: null,
-            riskBand: "Low" as const,
+            riskBand: "Insufficient Data" as const,
+            observations: series.length,
           },
     };
   });
@@ -247,15 +262,17 @@ export async function analyzePortfolio(userId: number, portfolioId: number, pers
   const stockIdBySymbol = new Map(stocks.map((s) => [s.symbol, s.stock_id]));
   await generateAlertsSafely(userId, portfolio.portfolio_id, metrics, stockIdBySymbol);
 
-  // Point-in-time snapshot for the analysis history feature.
-  const snapshot = persistSnapshot
+  // Point-in-time snapshot for the analysis history feature. Only recorded
+  // when the risk statistics are actually computable — an insufficient-data
+  // analysis is never persisted as zeros (that would fake "low risk").
+  const snapshot = persistSnapshot && metrics.riskDataSufficient
     ? await prisma.portfolio_analysis.create({
         data: {
           portfolio_id: portfolio.portfolio_id,
-          risk_score: metrics.riskScore,
+          risk_score: metrics.riskScore ?? 0,
           diversification_score: metrics.diversificationScore,
-          volatility: metrics.annualisedVolatilityPct,
-          max_drawdown: metrics.maxDrawdownPct,
+          volatility: metrics.annualisedVolatilityPct ?? 0,
+          max_drawdown: metrics.maxDrawdownPct ?? 0,
           return_1y: metrics.return1yPct,
           return_3y: metrics.return3yPct,
           return_5y: metrics.return5yPct,
@@ -315,13 +332,14 @@ export async function getStockRiskProfile(symbol: string): Promise<StockRiskProf
   const prices = await prisma.stock_prices.findMany({
     where: { stock_id: stock.stock_id },
     orderBy: { price_date: "asc" },
-    select: { price_date: true, close_price: true },
+    select: { price_date: true, close_price: true, data_source: true },
   });
   const series: PricePoint[] = prices.map((p) => ({
     date: p.price_date.toISOString().slice(0, 10),
     close: Number(p.close_price),
   }));
-  return getStockRiskProfileFromSeries(series);
+  const sourceByDate = new Map(prices.map((p) => [p.price_date.toISOString().slice(0, 10), p.data_source]));
+  return getStockRiskProfileFromSeries(series, sourceByDate);
 }
 
 /** Aggregated metrics across every portfolio the user owns (dashboard). */
@@ -380,7 +398,8 @@ export async function simulateBuy(userId: number, portfolioId: number, symbol: s
   const after = computeMetrics(simulated, metaBySymbol, historyBySymbol);
 
   const divDelta = after.diversificationScore - before.diversificationScore;
-  const riskDelta = after.riskScore - before.riskScore;
+  const riskDelta =
+    after.riskScore !== null && before.riskScore !== null ? after.riskScore - before.riskScore : 0;
   const sectorBefore = before.sectorAllocation.find((s) => s.sector === candidateStock.sector)?.pct ?? 0;
   const sectorAfter = after.sectorAllocation.find((s) => s.sector === candidateStock.sector)?.pct ?? 0;
   const corr = portfolioCorrelation(upper, positions, metaBySymbol, historyBySymbol);
@@ -388,10 +407,14 @@ export async function simulateBuy(userId: number, portfolioId: number, symbol: s
 
   let score = 5;
   score += clamp(-2, 2, divDelta / 3);
-  score -= clamp(-2, 2, riskDelta / 3);
+  if (before.riskScore !== null && after.riskScore !== null) {
+    score -= clamp(-2, 2, riskDelta / 3);
+  }
   score -= clamp(0, 2, (sectorAfter - 30) / 15);
   if (corr !== null) score += clamp(-1.5, 1.5, (0.5 - corr) * 2);
-  score -= clamp(0, 1.5, (profile.volatilityPct - 30) / 15);
+  if (profile.volatilityPct !== null) {
+    score -= clamp(0, 1.5, (profile.volatilityPct - 30) / 15);
+  }
   const fitScore = Number(clamp(0, 10, score).toFixed(1));
 
   const classification: BuySimulationResult["classification"] =
@@ -405,8 +428,10 @@ export async function simulateBuy(userId: number, portfolioId: number, symbol: s
   );
   reasons.push(
     riskDelta > 0
-      ? `Portfolio risk score rises by ${riskDelta.toFixed(1)} points, largely from ${upper}'s ${profile.volatilityPct.toFixed(1)}% historical volatility.`
-      : `Portfolio risk score eases by ${Math.abs(riskDelta).toFixed(1)} points.`,
+      ? `Portfolio risk score rises by ${riskDelta.toFixed(1)} points, largely from ${upper}'s ${profile.volatilityPct !== null ? `${profile.volatilityPct.toFixed(1)}% historical volatility` : "profile"}.`
+      : riskDelta < 0
+        ? `Portfolio risk score eases by ${Math.abs(riskDelta).toFixed(1)} points.`
+        : "Risk-score impact could not be measured: overlapping price history is still insufficient.",
   );
   reasons.push(
     `${candidateStock.sector} exposure moves from ${sectorBefore.toFixed(1)}% to ${sectorAfter.toFixed(1)}% of portfolio value.`,
@@ -489,18 +514,22 @@ export async function simulateSell(userId: number, holdingId: number, pct: numbe
   } else {
     reasons.push(`This position is ${weight.toFixed(1)}% of portfolio value, within a typical single-name weight.`);
   }
-  if (profile.volatilityPct > 32) {
+  if (profile.volatilityPct !== null && profile.volatilityPct > 32) {
     flags += 1;
     reasons.push(
       `Historical volatility of ${profile.volatilityPct.toFixed(1)}% is in the high band; current indicators suggest elevated risk.`,
     );
+  } else if (profile.volatilityPct === null) {
+    reasons.push("Volatility could not be estimated for this stock: its stored price history is still too short.");
   }
   if (sectorBefore > 35) {
     flags += 1;
     reasons.push(`${holding.stocks.sector} already accounts for ${sectorBefore.toFixed(1)}% of the portfolio.`);
   }
   reasons.push(
-    `Selling ${pct}% moves the risk score from ${before.riskScore.toFixed(1)} to ${after.riskScore.toFixed(1)} and diversification from ${before.diversificationScore.toFixed(1)} to ${after.diversificationScore.toFixed(1)}.`,
+    before.riskScore !== null && after.riskScore !== null
+      ? `Selling ${pct}% moves the risk score from ${before.riskScore.toFixed(1)} to ${after.riskScore.toFixed(1)} and diversification from ${before.diversificationScore.toFixed(1)} to ${after.diversificationScore.toFixed(1)}.`
+      : `Selling ${pct}% moves diversification from ${before.diversificationScore.toFixed(1)} to ${after.diversificationScore.toFixed(1)}; risk-score impact is not yet measurable from the stored history.`,
   );
 
   const recommendation: SellSimulationResult["recommendation"] =

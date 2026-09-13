@@ -12,9 +12,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DemoDataBadge } from "@/components/common/data-display";
+import { FreshnessBadge } from "@/components/common/data-display";
 import { CardsSkeleton, EmptyState, ErrorState } from "@/components/common/states";
-import { formatCurrency, formatPct } from "@/lib/format";
+import { formatCurrency, formatCurrencyOrNull, formatPct } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import * as stockService from "@/services/stock.service";
 
@@ -25,12 +25,12 @@ export const Route = createFileRoute("/_app/stocks/")({
       {
         name: "description",
         content:
-          "Search, filter and sort the PortfolioIQ demo stock universe with sector, price, volatility and drawdown information.",
+          "Search, filter and sort the PortfolioIQ stock universe with sector, price, volatility and drawdown information.",
       },
       { property: "og:title", content: "Stock Explorer — PortfolioIQ" },
       {
         property: "og:description",
-        content: "Browse the demo stock universe and open any symbol for full risk and return analysis.",
+        content: "Browse the stock universe and open any symbol for full risk and return analysis.",
       },
     ],
   }),
@@ -65,11 +65,11 @@ function StocksPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Stock Explorer</h1>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Browse the demo stock universe, compare sectors and historical risk, then open a symbol to analyse it
+            Browse the stock universe, compare sectors and historical risk, then open a symbol to analyse it
             against your own portfolio.
           </p>
         </div>
-        <DemoDataBadge />
+        <FreshnessBadge syncedAt={query.dataUpdatedAt ? new Date(query.dataUpdatedAt).toISOString() : null} status={null} />
       </div>
 
       <div className="panel grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -150,8 +150,8 @@ function StocksPage() {
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {data.rows.map((s) => {
-              const change = s.lastPrice - s.previousClose;
-              const changePct = s.previousClose ? (change / s.previousClose) * 100 : 0;
+              const change = s.lastPrice !== null && s.previousClose !== null ? s.lastPrice - s.previousClose : null;
+              const changePct = change !== null && s.previousClose ? (change / s.previousClose) * 100 : null;
               // Risk comes from the backend analytics engine over the dataset's
               // price history (attached to each stock row).
               const risk = s.risk;
@@ -174,21 +174,24 @@ function StocksPage() {
                   </div>
 
                   <div className="flex items-baseline gap-2">
-                    <span className="num text-lg font-semibold">{formatCurrency(s.lastPrice)}</span>
-                    <span className={cn("num text-xs font-medium", change >= 0 ? "text-gain" : "text-loss")}>
-                      {change >= 0 ? "+" : "−"}
-                      {formatCurrency(Math.abs(change))} ({formatPct(changePct)})
+                    <span className="num text-lg font-semibold">{formatCurrencyOrNull(s.lastPrice)}</span>
+                    <span className={cn("num text-xs font-medium", change === null ? "text-muted-foreground" : change >= 0 ? "text-gain" : "text-loss")}>
+                      {change === null ? "N/A" : `${change >= 0 ? "+" : "−"}${formatCurrency(Math.abs(change))} (${formatPct(changePct ?? 0)})`}
                     </span>
                   </div>
 
                   <dl className="grid grid-cols-3 gap-2 border-t border-border/60 pt-3 text-xs">
                     <div>
                       <dt className="text-muted-foreground">Volatility</dt>
-                      <dd className="num mt-0.5 font-medium">{risk.volatilityPct.toFixed(1)}%</dd>
+                      <dd className="num mt-0.5 font-medium">
+                        {risk.volatilityPct === null ? "N/A" : `${risk.volatilityPct.toFixed(1)}%`}
+                      </dd>
                     </div>
                     <div>
                       <dt className="text-muted-foreground">Max drawdown</dt>
-                      <dd className="num mt-0.5 font-medium text-loss">{risk.maxDrawdownPct.toFixed(1)}%</dd>
+                      <dd className="num mt-0.5 font-medium text-loss">
+                        {risk.maxDrawdownPct === null ? "N/A" : `${risk.maxDrawdownPct.toFixed(1)}%`}
+                      </dd>
                     </div>
                     <div>
                       <dt className="text-muted-foreground">Risk band</dt>
@@ -210,7 +213,7 @@ function StocksPage() {
           <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
             <span>
               Showing {(data.page - 1) * data.pageSize + 1}–{Math.min(data.page * data.pageSize, data.total)} of{" "}
-              {data.total} demo stocks
+              {data.total} stocks
             </span>
             <div className="flex items-center gap-2">
               <Button

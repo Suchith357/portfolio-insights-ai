@@ -13,11 +13,22 @@ const querySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).optional(),
 });
 
+const pricesQuerySchema = z.object({
+  // Explicit, bounded "latest N" — unbounded values are rejected here so the
+  // service never has to guess what an arbitrary limit means.
+  limit: z.coerce.number().int().positive().max(2600).optional(),
+});
+
 export const stocksRouter = Router();
 
 // Catalogue browsing is public read-only; portfolio features stay protected.
 stocksRouter.get("/", validate(querySchema, "query"), stocks.list);
 stocksRouter.get("/sectors", stocks.listSectors);
-stocksRouter.get("/:symbol/prices", validate(symbolParam, "params"), stocks.getPrices);
+stocksRouter.get(
+  "/:symbol/prices",
+  validate(symbolParam, "params"),
+  validate(pricesQuerySchema, "query"),
+  stocks.getPrices,
+);
 stocksRouter.get("/:symbol/risk", validate(symbolParam, "params"), stocks.getRisk);
 stocksRouter.get("/:symbol", validate(symbolParam, "params"), stocks.getDetail);

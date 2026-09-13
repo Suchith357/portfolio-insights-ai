@@ -11,9 +11,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DemoDataBadge, SeverityBadge } from "@/components/common/data-display";
+import { MarketDataBadge, SeverityBadge } from "@/components/common/data-display";
 import { EmptyState, ErrorState, TableSkeleton } from "@/components/common/states";
-import { formatCurrency, formatDate, formatPct } from "@/lib/format";
+import { formatCurrency, formatCurrencyOrNull, formatDate, formatPct } from "@/lib/format";
 import { getStock, getStockRiskProfile } from "@/lib/analytics";
 import { STOCKS } from "@/lib/demo-data";
 import { cn } from "@/lib/utils";
@@ -88,7 +88,7 @@ function WatchlistPage() {
             price history.
           </p>
         </div>
-        <DemoDataBadge />
+        <MarketDataBadge />
       </div>
 
       <div className="panel flex flex-wrap items-end gap-3 p-4">
@@ -156,8 +156,8 @@ function WatchlistPage() {
                 // Demo mode: resolve from the in-browser dataset.
                 const stock = item.stock ?? getStock(item.symbol);
                 const risk = item.stock?.risk ?? getStockRiskProfile(item.symbol);
-                const change = stock ? stock.lastPrice - stock.previousClose : 0;
-                const changePct = stock && stock.previousClose ? (change / stock.previousClose) * 100 : 0;
+                const change = stock && stock.lastPrice !== null && stock.previousClose !== null ? stock.lastPrice - stock.previousClose : null;
+                const changePct = change !== null && stock?.previousClose ? (change / stock.previousClose) * 100 : null;
                 const stockAlerts = (alerts.data ?? []).filter((a) => a.symbol === item.symbol);
                 const worst = stockAlerts[0];
                 return (
@@ -172,11 +172,13 @@ function WatchlistPage() {
                       </Link>
                       <p className="truncate text-xs text-muted-foreground">{stock?.name ?? "Unknown stock"}</p>
                     </td>
-                    <td className="num px-4 py-3">{stock ? formatCurrency(stock.lastPrice) : "—"}</td>
-                    <td className={cn("num px-4 py-3", change >= 0 ? "text-gain" : "text-loss")}>
-                      {formatPct(changePct)}
+                    <td className="num px-4 py-3">{stock ? formatCurrencyOrNull(stock.lastPrice) : "—"}</td>
+                    <td className={cn("num px-4 py-3", change === null ? "text-muted-foreground" : change >= 0 ? "text-gain" : "text-loss")}>
+                      {change === null ? "N/A" : formatPct(changePct ?? 0)}
                     </td>
-                    <td className="num px-4 py-3">{risk.volatilityPct.toFixed(1)}%</td>
+                    <td className="num px-4 py-3">
+                      {risk.volatilityPct === null ? "N/A" : `${risk.volatilityPct.toFixed(1)}%`}
+                    </td>
                     <td className="px-4 py-3">
                       <Badge variant="outline" className="text-[10px]">
                         {risk.riskBand}

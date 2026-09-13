@@ -82,7 +82,7 @@ function Landing() {
             </Button>
           </div>
           <p className="mt-6 text-xs text-muted-foreground">
-            Runs on a synthetic academic dataset. Not live market data and not investment advice.
+            Live market data refreshed from a free public feed. Not investment advice.
           </p>
         </section>
 

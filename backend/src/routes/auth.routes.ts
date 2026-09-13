@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { validate } from "../middleware/validate.js";
 import { requireAuth } from "../middleware/auth.js";
+import { rateLimit } from "../middleware/rate-limit.js";
 import * as auth from "../controllers/auth.controller.js";
 
 const registerSchema = z.object({
@@ -17,6 +18,9 @@ const loginSchema = z.object({
 
 export const authRouter = Router();
 
-authRouter.post("/register", validate(registerSchema), auth.register);
-authRouter.post("/login", validate(loginSchema), auth.login);
+// Brute-force protection on the unauthenticated endpoints.
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, scope: "auth" });
+
+authRouter.post("/register", authLimiter, validate(registerSchema), auth.register);
+authRouter.post("/login", authLimiter, validate(loginSchema), auth.login);
 authRouter.get("/me", requireAuth, auth.me);

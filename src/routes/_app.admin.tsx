@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DemoDataBadge, SectionHeader, StatCard } from "@/components/common/data-display";
+import { MarketDataBadge, SectionHeader, StatCard } from "@/components/common/data-display";
 import { CardsSkeleton, EmptyState, ErrorState, TableSkeleton } from "@/components/common/states";
 import { ErrorState as Forbidden } from "@/components/common/states";
-import { formatCurrency, formatDateTime, formatDate } from "@/lib/format";
+import { formatCurrency, formatCurrencyOrNull, formatDateTime, formatDate } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
 import * as adminService from "@/services/admin.service";
 
@@ -55,6 +56,7 @@ function AdminPage() {
 function AdminConsole() {
   const [userQuery, setUserQuery] = useState("");
   const [stockQuery, setStockQuery] = useState("");
+  const qc = useQueryClient();
 
   const stats = useQuery({ queryKey: ["admin", "stats"], queryFn: adminService.getStats });
   const [users, stocks, audit] = useQueries({
@@ -72,6 +74,27 @@ function AdminConsole() {
     `${s.symbol} ${s.name} ${s.sector}`.toLowerCase().includes(stockQuery.trim().toLowerCase()),
   );
 
+  const syncStatus = useQuery({
+    queryKey: ["admin", "market-data"],
+    queryFn: adminService.getMarketDataStatus,
+    refetchInterval: 30000,
+  });
+  const triggerSync = useMutation({
+    mutationFn: (mode: "LATEST" | "FULL") => adminService.triggerMarketDataSync(mode, mode === "FULL"),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin", "market-data"] });
+      window.setTimeout(() => void qc.invalidateQueries({ queryKey: ["admin", "market-data"] }), 5000);
+    },
+  });
+
+  const last = syncStatus.data?.last ?? null;
+  const syncBadgeTone =
+    !last || last.status === "FAILED"
+      ? "text-loss"
+      : last.status === "PARTIAL"
+        ? "text-warning"
+        : "text-gain";
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -82,7 +105,7 @@ function AdminConsole() {
             convenience only — the backend must enforce the ADMIN role on every endpoint.
           </p>
         </div>
-        <DemoDataBadge />
+        <MarketDataBadge />
       </div>
 
       {stats.isLoading ? (
@@ -95,15 +118,24 @@ function AdminConsole() {
             <StatCard
               label="Users"
               value={String(stats.data.totalUsers)}
-              sub={`${stats.data.activeUsers} active · ${stats.data.suspendedUsers} suspended`}
+              sub={`${stats.data.userRoleUsers} user role · ${stats.data.adminUsers} admin`}
             />
             <StatCard label="Portfolios" value={String(stats.data.totalPortfolios)} />
             <StatCard label="Holdings" value={String(stats.data.totalHoldings)} />
             <StatCard label="Transactions" value={String(stats.data.totalTransactions)} />
           </div>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <StatCard label="Stocks in catalogue" value={String(stats.data.totalStocks)} />
+            <StatCard
+              label="Stocks in catalogue"
+              value={String(stats.data.totalStocks)}
+              sub={`${stats.data.stocksUsingRealData} on real market data`}
+            />
             <StatCard label="Alerts published" value={String(stats.data.totalAlerts)} />
+            <StatCard
+              label="Market data"
+              value={stats.data.lastMarketDataSync ? formatDateTime(stats.data.lastMarketDataSync) : "No sync yet"}
+              {...(stats.data.lastMarketDataStatus ? { sub: `Last sync: ${stats.data.lastMarketDataStatus.toLowerCase()}` } : {})}
+            />
           </div>
         </>
       ) : null}
@@ -112,6 +144,7 @@ function AdminConsole() {
         <TabsList>
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="stocks">Stock catalogue</TabsTrigger>
+          <TabsTrigger value="market-data">Market data</TabsTrigger>
           <TabsTrigger value="audit">Audit log</TabsTrigger>
         </TabsList>
 
@@ -138,7 +171,6 @@ function AdminConsole() {
                     <th className="px-4 py-3 font-medium">Name</th>
                     <th className="px-4 py-3 font-medium">Email</th>
                     <th className="px-4 py-3 font-medium">Role</th>
-                    <th className="px-4 py-3 font-medium">Status</th>
                     <th className="px-4 py-3 font-medium">Joined</th>
                   </tr>
                 </thead>
@@ -152,17 +184,6 @@ function AdminConsole() {
                           {u.role}
                         </Badge>
                       </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={
-                            u.status === "ACTIVE"
-                              ? "rounded-full border border-gain/40 bg-gain/10 px-2 py-0.5 text-[11px] font-semibold text-gain"
-                              : "rounded-full border border-destructive/50 bg-destructive/10 px-2 py-0.5 text-[11px] font-semibold text-destructive"
-                          }
-                        >
-                          {u.status}
-                        </span>
-                      </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{formatDate(u.createdAt)}</td>
                     </tr>
                   ))}
@@ -175,7 +196,7 @@ function AdminConsole() {
         <TabsContent value="stocks" className="space-y-4 pt-4">
           <SectionHeader
             title="Managed stock catalogue"
-            description="Reference data the analytics engine reads. Prices are synthetic demo values."
+            description="Reference data the analytics engine reads. Prices refresh from Yahoo Finance every ~45 minutes."
           />
           <Input
             value={stockQuery}
@@ -199,7 +220,7 @@ function AdminConsole() {
                     <th className="px-4 py-3 font-medium">Company</th>
                     <th className="px-4 py-3 font-medium">Sector</th>
                     <th className="px-4 py-3 font-medium">Exchange</th>
-                    <th className="px-4 py-3 font-medium">Demo price</th>
+                    <th className="px-4 py-3 font-medium">Latest price</th>
                     <th className="px-4 py-3 font-medium">Market cap</th>
                   </tr>
                 </thead>
@@ -210,12 +231,78 @@ function AdminConsole() {
                       <td className="px-4 py-3 text-muted-foreground">{s.name}</td>
                       <td className="px-4 py-3">{s.sector}</td>
                       <td className="px-4 py-3 text-muted-foreground">{s.exchange}</td>
-                      <td className="num px-4 py-3">{formatCurrency(s.lastPrice)}</td>
-                      <td className="num px-4 py-3">₹{s.marketCapCr.toLocaleString("en-IN")} Cr</td>
+                      <td className="num px-4 py-3">{formatCurrencyOrNull(s.lastPrice)}</td>
+                      <td className="num px-4 py-3">
+                        {s.marketCapCr === null ? "N/A" : `₹${s.marketCapCr.toLocaleString("en-IN")} Cr`}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="market-data" className="space-y-4 pt-4">
+          <SectionHeader
+            title="Market data pipeline"
+            description="Prices and fundamentals refresh from Yahoo Finance every 45 minutes. One stock failing (e.g. no provider coverage) never aborts the run — it is recorded here."
+          />
+          {syncStatus.isLoading ? (
+            <TableSkeleton rows={3} />
+          ) : syncStatus.isError ? (
+            <ErrorState title="We couldn't load sync status" onRetry={() => syncStatus.refetch()} />
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  size="sm"
+                  onClick={() => triggerSync.mutate("LATEST")}
+                  disabled={triggerSync.isPending || syncStatus.data?.running === true}
+                >
+                  {triggerSync.isPending
+                    ? "Starting…"
+                    : syncStatus.data?.running
+                      ? "Sync running…"
+                      : "Refresh now"}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  Fetches the latest ~10 trading days for all {stats.data?.totalStocks ?? 38} catalogue stocks.
+                </span>
+              </div>
+              {!last ? (
+                <EmptyState title="No sync recorded yet" description="The scheduler writes one row per run." />
+              ) : (
+                <div className="panel p-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Badge variant="outline" className="text-[10px]">
+                      {last.triggerType} · {last.mode}
+                    </Badge>
+                    <span className={`num text-sm font-semibold ${syncBadgeTone}`}>{last.status}</span>
+                    <span className="text-xs text-muted-foreground">
+                      finished {last.finishedAt ? formatDateTime(last.finishedAt) : "—"}
+                    </span>
+                  </div>
+                  <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-border/60 pt-4 text-sm sm:grid-cols-5">
+                    {[
+                      { label: "Stocks processed", value: String(last.stocksProcessed) },
+                      { label: "Prices upserted", value: String(last.pricesUpserted) },
+                      { label: "Fundamentals updated", value: String(last.fundamentalsUpdated) },
+                      { label: "Failures", value: String(last.failures) },
+                    ].map((s) => (
+                      <div key={s.label}>
+                        <dt className="text-xs text-muted-foreground">{s.label}</dt>
+                        <dd className="num mt-0.5 font-medium">{s.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {last.errorMessage && (
+                    <p className="mt-4 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning">
+                      <span className="font-semibold">Failure detail:</span> {last.errorMessage}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </TabsContent>
@@ -237,7 +324,7 @@ function AdminConsole() {
                     <th className="px-4 py-3 font-medium">Actor</th>
                     <th className="px-4 py-3 font-medium">Action</th>
                     <th className="px-4 py-3 font-medium">Entity</th>
-                    <th className="px-4 py-3 font-medium">IP</th>
+                    <th className="px-4 py-3 font-medium">Details</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -253,7 +340,7 @@ function AdminConsole() {
                       <td className="px-4 py-3 text-muted-foreground">
                         {entry.entity} <span className="num text-xs">#{entry.entityId}</span>
                       </td>
-                      <td className="num px-4 py-3 text-xs text-muted-foreground">{entry.ip}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{entry.details || "—"}</td>
                     </tr>
                   ))}
                 </tbody>

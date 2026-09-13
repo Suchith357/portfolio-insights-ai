@@ -59,14 +59,18 @@ export async function changePassword(
   }
 
   const passwordHash = await hashPassword(input.newPassword);
-  await prisma.users.update({ where: { user_id: userId }, data: { password_hash: passwordHash } });
+  const now = new Date();
+  await prisma.users.update({
+    where: { user_id: userId },
+    data: { password_hash: passwordHash, password_changed_at: now },
+  });
 
   await recordAudit({
     userId,
     action: "PASSWORD_CHANGE",
     entityType: "USER",
     entityId: userId,
-    details: "Password changed.",
+    details: "Password changed; sessions issued before now are invalidated.",
   });
 
   return { changed: true };

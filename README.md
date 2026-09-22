@@ -1,1114 +1,213 @@
-# Portfolio Insights AI
+# PortfolioIQ
 
-PORTFOLIOIQ — INITIAL APPLICATION BUILD
+**Evidence-based portfolio intelligence — a full-stack financial research platform.**
 
-Build a professional full-stack web application called:
+PortfolioIQ combines real market data, news/event intelligence, a quantitative risk
+engine, benchmark comparison, transaction-true performance, a local RAG stack, and a
+locally-running LLM (Qwen3-4B via Ollama) into one explainable system.
 
-PortfolioIQ — AI-Powered Stock Portfolio Risk & Diversification Analyzer
+> **Disclaimer** — PortfolioIQ is an educational/research decision-support system.
+> It does not provide guaranteed investment returns or personalized financial
+> advice. Every AI-generated statement is grounded in retrieved evidence and
+> explicitly separates facts from interpretation. BUY/HOLD/AVOID output is the
+> output of a transparent, documented scoring framework — not a prediction.
 
-This is a Database Systems academic project and a serious resume project.
+---
 
-IMPORTANT — READ BEFORE BUILDING
+## Features
 
-Do NOT create a simple CRUD stock application.
+| Area | What you get |
+|---|---|
+| Portfolios | Multi-portfolio CRUD, holdings, full transaction history, watchlists |
+| Market data | Yahoo Finance primary, optional Alpha Vantage fallback, 45-min scheduler, per-row provenance, sanity validation |
+| Risk engine | Volatility, downside deviation, Sharpe/Sortino/Calmar, max drawdown + recovery, historical VaR 95/99, CVaR, concentration/HHI, diversification ratio, marginal/component risk, rolling metrics |
+| Benchmark | NIFTY 50 (`^NSEI`) sync, Beta, Jensen's Alpha, tracking error, information ratio, upside/downside capture |
+| Performance | Transaction-true P&L (realized/unrealized), holding period, turnover, BUY vs SELL reconstruction |
+| Intelligence | GDELT (+ optional Marketaux) news → entity matching → event detection → lifecycle → portfolio exposure mapping |
+| Alerts | Deterministic multi-signal importance (WATCH→CRITICAL), one-alert-per-event, cooldown/dedup |
+| AI / RAG | Qwen3-Embedding-0.6B + FAISS retrieval, grounding gate, Qwen3-4B reasoning with `[E1]`-style citations |
+| Stock research | "AI Deep Analysis" report: context → multi-query RAG → deterministic BUY/HOLD/AVOID decision engine → LLM explanation, bull/base/bear scenarios |
+| Scenarios | What-if buy/sell/rebalance, historical event analogues, stress presets |
+| Ops | JWT + bcrypt auth, RBAC, ownership enforcement, audit log, rate limiting, stored procedure, Docker compose |
 
-The product vision is:
+---
 
-A portfolio-aware investment analysis platform where users can manage portfolios, analyze their risk and diversification, investigate stocks using historical data, simulate buying or selling stocks, and receive AI-assisted explanations based on their portfolio.
+## Architecture
 
-The application must be designed so that the PostgreSQL database and Node.js backend will become the core of the system.
-
-TECHNOLOGY
-
-Use:
-
-React
-
-TypeScript
-
-Node.js
-
-Express.js
-
-PostgreSQL
-
-Prisma ORM
-
-JWT authentication
-
-bcrypt password hashing
-
-Do not introduce a different primary stack.
-
-The frontend must communicate with the backend through REST APIs.
-
-Do not connect React directly to PostgreSQL.
-
-IMPORTANT DATABASE INSTRUCTION
-
-Do NOT invent a final database schema yet.
-
-The database will be designed separately from the application using:
-
-ER diagram
-
-Relational schema
-
-3NF normalization
-
-Data dictionary
-
-Primary keys
-
-Foreign keys
-
-Constraints
-
-Indexes
-
-The eventual database will contain at least 8 related tables.
-
-Candidate conceptual entities may include:
-
-Users
-
-Roles
-
-Portfolios
-
-Stocks
-
-Sectors
-
-Holdings
-
-Transactions
-
-Watchlists
-
-Historical Prices
-
-Portfolio Analyses
-
-Risk Metrics
-
-News Events
-
-Alerts
-
-Audit Logs
-
-These are NOT instructions to blindly create all of these tables.
-
-The final schema will be determined from the ER diagram.
-
-APPLICATION USERS
-
-There are two roles:
-
-USER
-
-A normal user can:
-
-Register
-
-Login
-
-Logout
-
-Manage profile
-
-Create portfolios
-
-Edit portfolios
-
-Delete portfolios
-
-View portfolios
-
-Manage holdings
-
-Record buy transactions
-
-Record sell transactions
-
-View transaction history
-
-Search stocks
-
-Analyze stocks
-
-Simulate adding stocks
-
-Analyze existing holdings
-
-Simulate selling holdings
-
-View risk
-
-View diversification
-
-Manage watchlist
-
-View alerts
-
-View AI insights
-
-ADMIN
-
-Admin can additionally:
-
-View users
-
-Manage users
-
-View stock data
-
-View system statistics
-
-View audit information
-
-There must NOT be separate Admin and User database tables.
-
-The eventual database will use a single Users table with role information.
-
-REQUIRED PAGES
-
-Create these pages and routes.
-
-Public
-
-Landing Page
-
-Create a polished fintech landing page.
-
-Include:
-
-PortfolioIQ logo/branding
-
-Hero section
-
-Short product description
-
-Risk analysis explanation
-
-Diversification explanation
-
-Stock analysis explanation
-
-AI insights explanation
-
-News alert explanation
-
-Call-to-action buttons
-
-Login
-
-Register
-
-Do NOT make unsupported claims such as guaranteed profits.
-
-Login
-
-Fields:
-
-Email
-
-Password
-
-Include:
-
-Validation
-
-Loading state
-
-Error state
-
-Login button
-
-Link to registration
-
-Registration
-
-Fields:
-
-Name
-
-Email
-
-Password
-
-Confirm password
-
-Include proper validation.
-
-USER DASHBOARD
-
-Create a professional financial dashboard.
-
-Display:
-
-Total Portfolio Value
-
-Total Investment
-
-Profit/Loss
-
-Risk Score
-
-Diversification Score
-
-Sector Allocation
-
-Stock Allocation
-
-Portfolio Performance
-
-Recent Transactions
-
-Important Alerts
-
-AI Insights
-
-Use appropriate charts and visualizations.
-
-The dashboard should feel like a serious fintech analytics product.
-
-PORTFOLIOS
-
-Create a portfolio management page.
-
-Users should be able to:
-
-Create portfolio
-
-Edit portfolio
-
-Delete portfolio
-
-Open portfolio
-
-View portfolio summary
-
-Portfolio details should contain:
-
-Overview
-
-Total value
-
-Investment
-
-Profit/Loss
-
-Risk
-
-Diversification
-
-Holdings
-
-Stock
-
-Quantity
-
-Average purchase price
-
-Current/available price
-
-Current value
-
-Profit/Loss
-
-Allocation %
-
-Transactions
-
-Buy/Sell
-
-Stock
-
-Quantity
-
-Price
-
-Date
-
-Transaction value
-
-STOCK EXPLORER
-
-Create a stock search/explorer page.
-
-Include:
-
-Search
-
-Filtering
-
-Sorting
-
-Pagination
-
-Stock cards/table
-
-Stock symbol
-
-Company name
-
-Sector
-
-Available price information
-
-Clicking a stock should open its detailed analysis.
-
-Do not fabricate live financial information.
-
-If real market data is not connected yet, clearly label data as demo/sample data.
-
-STOCK DETAILS
-
-Create a professional stock detail page.
-
-Include:
-
-Stock name
-
-Symbol
-
-Sector
-
-Available current price
-
-Historical price chart
-
-Historical performance
-
-Volatility
-
-Risk information
-
-Provide a prominent:
-
-Analyze Against My Portfolio
-
-button.
-
-STOCK ANALYSIS
-
-This is one of the most important PortfolioIQ features.
-
-When a user searches for a stock they are interested in, PortfolioIQ should analyze the stock AND compare it with their existing portfolio.
-
-Historical Analysis
-
-Display:
-
-Historical price chart
-
-Available 1-year performance
-
-Available 3-year performance
-
-Available 5-year performance
-
-Volatility
-
-Drawdown
-
-Historical risk
-
-Only display metrics when the required data exists.
-
-PORTFOLIO COMPARISON
-
-Compare:
-
-Candidate Stock
-
-against:
-
-User's Current Portfolio
-
-Show:
-
-Sector overlap
-
-Existing exposure
-
-Concentration impact
-
-Diversification impact
-
-Risk impact
-
-Correlation when sufficient data exists
-
-BUY SIMULATION
-
-Allow the user to enter:
-
-Candidate stock
-
-Hypothetical investment amount
-
-Example:
-
-TCS
-₹50,000
-
-This MUST be a simulation.
-
-It must NOT modify the real portfolio.
-
-Show:
-
-Current Portfolio
-
-Risk score
-
-Diversification score
-
-Sector allocation
-
-Stock concentration
-
-Simulated Portfolio
-
-Risk score
-
-Diversification score
-
-Sector allocation
-
-Stock concentration
-
-Difference
-
-Show how the hypothetical investment changes the portfolio.
-
-Finally provide:
-
-Portfolio Fit Score
-
-Example:
-
-7.4 / 10
-
-Possible classification:
-
-Strong Fit
-
-Reasonable Fit
-
-Weak Fit
-
-Poor Fit
-
-The exact score calculation will be implemented later in the analytics engine.
-
-HOLDING ANALYSIS
-
-For stocks already owned by the user, create a detailed holding-analysis experience.
-
-Show:
-
-Current quantity
-
-Average purchase price
-
-Current value
-
-Profit/Loss
-
-Allocation
-
-Historical performance
-
-Risk
-
-Allow simulation of:
-
-Sell 10%
-
-Sell 25%
-
-Sell 50%
-
-Sell 75%
-
-Sell 100%
-
-Custom percentage
-
-This is ONLY a simulation.
-
-It must NOT create an actual transaction.
-
-Compare:
-
-Before Sale
-
-Portfolio value
-
-Risk
-
-Diversification
-
-Sector exposure
-
-Stock concentration
-
-After Simulated Sale
-
-Portfolio value
-
-Risk
-
-Diversification
-
-Sector exposure
-
-Stock concentration
-
-Then produce:
-
-HOLD
-
-REVIEW
-
-CONSIDER REDUCING
-
-Do NOT claim certainty about future prices.
-
-Use wording such as:
-
-"Current indicators suggest elevated risk."
-
-rather than:
-
-"This stock will definitely fall."
-
-NEWS AND RISK ALERTS
-
-Create an Alerts page.
-
-The system should eventually support monitoring relevant news for stocks owned by the user.
-
-Each alert should show:
-
-Stock
-
-Headline
-
-Event type
-
-Severity
-
-Timestamp
-
-Summary
-
-Source
-
-User's portfolio exposure
-
-Why the event may matter
-
-Severity levels:
-
-LOW
-
-MEDIUM
-
-HIGH
-
-CRITICAL
-
-High-severity alerts should be visually prominent.
-
-Do not claim that a news event guarantees a future loss.
-
-AI INSIGHTS
-
-Create an AI Insights section throughout the application.
-
-AI should explain structured calculations.
-
-The AI may receive:
-
-Risk score
-
-Diversification score
-
-Sector allocation
-
-Stock concentration
-
-Historical performance
-
-Simulation results
-
-News classification
-
-The AI should NOT invent numerical financial data.
-
-The analytics engine calculates numbers.
-
-The AI explains the numbers.
-
-The AI integration must be replaceable and must NOT require a paid API for the core application.
-
-Do not hardcode API keys.
-
-WATCHLIST
-
-Create a Watchlist page.
-
-Users can:
-
-Add stocks
-
-Remove stocks
-
-Search
-
-Filter
-
-View saved stocks
-
-ADMIN DASHBOARD
-
-Create a separate protected admin area.
-
-Include:
-
-Overview
-
-Total users
-
-Total portfolios
-
-Total holdings
-
-Total transactions
-
-Number of alerts
-
-User Management
-
-User list
-
-Search
-
-Filter
-
-Pagination
-
-Role information
-
-Account status
-
-Stock/Data Management
-
-Provide a management interface for stock data.
-
-Audit Information
-
-Create a professional audit-log interface.
-
-NAVIGATION
-
-For normal users:
-
-Dashboard
-Portfolios
-Stock Explorer
-Watchlist
-Alerts
-Profile
-
-For admins:
-
-Dashboard
-Portfolios
-Stock Explorer
-Watchlist
-Alerts
-Admin
-
-Do not display admin navigation to normal users.
-
-However, hiding navigation is NOT sufficient authorization.
-
-The backend must eventually enforce authorization.
-
-DESIGN
-
-Create a modern fintech design.
-
-The product should feel similar in quality to professional financial analytics software.
-
-Use:
-
-Responsive layout
-
-Professional typography
-
-Clean cards
-
-Charts
-
-Data tables
-
-Tabs
-
-Search bars
-
-Filters
-
-Badges
-
-Toasts
-
-Modal dialogs
-
-Loading skeletons
-
-Empty states
-
-Error states
-
-Confirmation dialogs
-
-Use a consistent visual language throughout the entire application.
-
-Avoid excessive gradients, animations, or decorative elements.
-
-Prioritize readability of financial information.
-
-RESPONSIVENESS
-
-The application must work properly on:
-
-Desktop
-
-Laptop
-
-Tablet
-
-Mobile
-
-Do not simply scale the desktop layout down.
-
-Tables and charts must remain usable on smaller screens.
-
-VALIDATION
-
-Implement frontend validation for:
-
-Login
-
-Registration
-
-Portfolio forms
-
-Holding forms
-
-Transaction forms
-
-Simulation inputs
-
-Search inputs
-
-Never rely exclusively on frontend validation.
-
-Backend validation will also be implemented later.
-
-ERROR STATES
-
-Create proper UI states for:
-
-Loading
-
-Empty data
-
-Invalid input
-
-Authentication failure
-
-Unauthorized access
-
-Not found
-
-Server failure
-
-Network failure
-
-Do not expose internal errors or database details to users.
-
-ARCHITECTURE
-
-Keep the code modular.
-
-Frontend:
-
-components
-pages
-layouts
-hooks
-services
-types
-utils
-
-Backend:
-
-routes
-controllers
-services
-middleware
-validators
-utils
-
-Business logic should NOT be placed directly inside React components.
-
-Database logic should NOT be placed directly inside Express route definitions.
-
-API ARCHITECTURE
-
-The frontend should be designed to communicate with REST endpoints.
-
-Potential endpoint structure:
-
-/api/auth
-/api/users
-/api/portfolios
-/api/holdings
-/api/transactions
-/api/stocks
-/api/watchlist
-/api/analysis
-/api/alerts
-/api/admin
-
-These are conceptual endpoint groups.
-
-Implement them cleanly and consistently.
-
-SECURITY
-
-Prepare the project for:
-
-JWT authentication
-bcrypt password hashing
-Protected routes
-Role-based authorization
-Input validation
-Secure environment variables
-
-Never hardcode:
-
-Database passwords
-
-JWT secrets
-
-API keys
-
-External service credentials
-
-Create:
-
-.env.example
-
-Do NOT create or commit actual secrets.
-
-ENVIRONMENT
-
-Use environment variables for configuration.
-
-Example:
-
-DATABASE_URL
-JWT_SECRET
-API_BASE_URL
-AI_API_KEY
-
-Only placeholders should exist in .env.example.
-
-GIT
-
-The project will be maintained using GitHub.
-
-Expected branches:
-
-main
-dev
-
-Development will primarily happen on dev.
-
-Do not generate fake Git commits.
-
-Do not attempt to manipulate GitHub history.
-
-The developer will handle Git operations separately.
-
-DATABASE
-
-PostgreSQL will be the final database.
-
-Prisma will be the ORM.
-
-Do not finalize the database schema independently.
-
-Do not create arbitrary tables simply to reach a table count.
-
-The database will later be designed from:
-
-ER Diagram
-→ Relational Schema
-→ 3NF
-→ PostgreSQL
-
-The application should be written so this database can be integrated cleanly.
-
-IMPORTANT DATABASE FEATURES TO SUPPORT LATER
-
-The final system will demonstrate:
-
-CRUD
-
-JOINs
-
-Aggregate queries
-
-Views
-
-Transactions
-
-PostgreSQL triggers
-
-PostgreSQL stored functions/procedures
-
-Indexes
-
-Do not fake these features in the frontend.
-
-DATA
-
-Do not fabricate live stock/news data.
-
-If sample data is needed for the UI, clearly identify it as:
-
-"Demo Data"
-
-The architecture must allow a real data ingestion layer to be connected later.
-
-₹0 REQUIREMENT
-
-The project must target a ₹0 budget.
-
-Do not make paid APIs or paid services mandatory.
-
-The core application must function without a paid AI API.
-
-External market data, news data and AI integrations must be replaceable.
-
-Use free/open-source tools and free tiers wherever practical.
-
-DOCKER
-
-Prepare the project so it can eventually support:
-
-frontend
-backend
-postgres
-
-through Docker/Docker Compose.
-
-Do not prioritize deployment before the application architecture is stable.
-
-IMPORTANT SCOPE RULE
-
-Do not try to implement every advanced database and AI feature in this first generation.
-
-For this initial build:
-
-Create the professional React application.
-
-Create the page structure.
-
-Create the navigation.
-
-Create reusable UI components.
-
-Create realistic demo/sample data clearly labeled as demo data.
-
-Create frontend state/data abstractions that can later connect to the Express API.
-
-Create the Express backend foundation.
-
-Create clean API route structure.
-
-Prepare Prisma integration without inventing the final schema.
-
-Prepare authentication architecture.
-
-Make the project easy to extend.
-
-The database architecture, ER diagram, normalization, advanced PostgreSQL SQL, triggers, stored functions, indexes, backup/restore, security hardening, real data ingestion, AI integration, testing, Docker and deployment will be implemented and reviewed separately.
-
-QUALITY STANDARD
-
-Before considering the initial build complete, check:
-
-All required pages exist.
-
-Navigation works.
-
-Protected/admin areas are represented correctly.
-
-Forms have validation.
-
-Loading/empty/error states exist.
-
-The UI is responsive.
-
-Stock analysis has a clear workflow.
-
-Buy simulation is clearly separated from actual transactions.
-
-Sell simulation is clearly separated from actual transactions.
-
-AI insights are clearly separated from raw analytics.
-
-No paid API is required.
-
-No secrets are hardcoded.
-
-No live data is falsely represented.
-
-Code is modular and maintainable.
-
-The project can later connect cleanly to PostgreSQL through Prisma.
-
-Build the initial PortfolioIQ application carefully and professionally.
-Do not simplify the project into a generic CRUD dashboard.
-
-This project was built with [Lovable](https://lovable.dev).
-
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/7dc0068d-5867-409c-bd66-eb2b9ae32531).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
-
-```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
 ```
+ Browser (React + TanStack Start, dark fintech UI)
+        │  REST (JWT)
+        ▼
+ Express API ── auth / RBAC / Zod validation / rate limiting / audit
+        │
+        ├── Market Providers ── Yahoo Finance ─┐
+        │                    └─ Alpha Vantage ─┤ (fallback chain, provenance)
+        ├── News Providers ─── GDELT ──────────┤
+        │                    └─ Marketaux ─────┤
+        ▼                                      ▼
+   PostgreSQL (source of truth, 19+ tables)  Normalization + validation
+        │
+        ├── Quantitative Risk Engine (covariance, VaR/CVaR, Beta/Alpha, Euler contributions)
+        ├── Intelligence Engine (entities → events → exposure → alerts)
+        ├── FAISS vector index (semantic retrieval only)
+        └── RAG + Ollama/Qwen3-4B (explanation layer — never the calculator)
+```
+
+Separation of responsibilities (enforced in code):
+
+- **External APIs** = real-world information (no fabricated data, ever)
+- **PostgreSQL** = structured source of truth
+- **Quantitative engine** = all math (the LLM never calculates authoritative numbers)
+- **FAISS/RAG** = evidence retrieval with a minimum-relevance grounding gate
+- **Qwen3-4B (local)** = reasoning/explanation over supplied evidence
+- **Alert engine** = deterministic importance/prioritization
+
+---
+
+## Tech stack
+
+React 19 + TypeScript + TanStack Start/Router + Tailwind (frontend) ·
+Node.js + Express + Prisma + PostgreSQL 16 (backend) ·
+Ollama + Qwen3-4B-Instruct-2507 **q4_K_M** + Qwen3-Embedding-0.6B + faiss-node (AI) ·
+Docker Compose (deployment).
+
+---
+
+## Quick start (local development)
+
+### Prerequisites
+- Node.js 20+, PostgreSQL 14+ running locally
+- (Optional, for AI) [Ollama](https://ollama.com) + ~3.1 GB disk for models
+
+### 1. Database
+```bash
+# create a database, then from backend/:
+cp .env.example .env            # set DATABASE_URL + JWT_SECRET
+npx prisma generate
+npx prisma migrate deploy       # or: prisma migrate dev
+for f in prisma/sql/*.sql; do node scripts/run-migration.cjs "$f"; done
+npm run db:seed                 # idempotent demo accounts; never deletes data
+```
+
+### 2. Backend
+```bash
+cd backend
+npm install
+npm run dev                     # http://localhost:4000  (45-min market scheduler starts)
+```
+
+### 3. Frontend
+```bash
+npm install   # repo root
+npm run dev                    # http://localhost:8080 (proxies /api → :4000)
+```
+
+### 4. AI (optional — everything works without it)
+```bash
+ollama pull qwen3:4b-instruct-2507-q4_K_M     # LLM  (~2.5 GB, ~4.5 GB VRAM)
+ollama pull qwen3-embedding:0.6b              # embeddings (~0.6 GB)
+# then: Admin → rebuild AI index (POST /api/admin/ai/index/rebuild)
+```
+If Ollama is unreachable, the UI shows **"Local AI unavailable — install/start
+Ollama to enable AI analysis."** and every other feature continues working.
+
+### Demo accounts (seeded)
+| Role | Email | Password (change via env) |
+|---|---|---|
+| USER | `user@portfolioiq.dev` | `SEED_USER_PASSWORD` (default `demo1234`) |
+| ADMIN | `admin@portfolioiq.dev` | `SEED_ADMIN_PASSWORD` (default `admin1234`) |
+
+---
+
+## Environment variables
+
+See **`backend/.env.example`** (backend) and **`.env.example`** (compose) —
+placeholders only, never commit real secrets.
+
+Key backend variables: `DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`,
+`BCRYPT_ROUNDS`, `CORS_ORIGIN`, `PORT`,
+`ALPHA_VANTAGE_API_KEY` *(optional)*, `MARKETAUX_API_KEY` *(optional)*,
+`SEED_USER_PASSWORD`/`SEED_ADMIN_PASSWORD`,
+AI: `AI_RUNTIME`, `AI_OLLAMA_BASE_URL`, `AI_LLM_MODEL`, `AI_EMBEDDING_MODEL`,
+`AI_LLM_QUANTIZATION`, `AI_LLM_CONTEXT_LENGTH`, `AI_DATA_DIR`, `RAG_TOP_K`,
+`RAG_MIN_SCORE`, plus decision-engine weights (`AI_WEIGHT_*`) and bands.
+
+---
+
+## Data providers
+
+| Provider | Kind | Key required | Status |
+|---|---|---|---|
+| Yahoo Finance | market data + benchmark | none | **primary** |
+| Alpha Vantage | market data fallback | `ALPHA_VANTAGE_API_KEY` (free tier) | optional |
+| GDELT | news/events | none | **primary** |
+| Marketaux | news fallback | `MARKETAUX_API_KEY` (free tier) | optional |
+
+Providers run through a registry with ordered fallback and per-provider failure
+isolation: a provider failure is logged and recorded, never fabricated around,
+and never crashes the app. Every stored price row carries `data_source`
+provenance (`YAHOO`/`ALPHA_VANTAGE`/`DEMO`).
+
+---
+
+## Docker
+
+```bash
+cp .env.example .env    # set POSTGRES_PASSWORD + JWT_SECRET
+docker compose up --build
+```
+- frontend → http://localhost:3000
+- backend  → http://localhost:4000
+- PostgreSQL → `db` service with a named volume (survives rebuilds)
+- Ollama stays on the **host** (`host.docker.internal:11434`) so the RTX GPU is used directly
+
+---
+
+## Backup & restore (PostgreSQL)
+
+```bash
+# Backup (safe, online):
+pg_dump -U portfolioiq -Fc portfolioiq > portfolioiq_$(date +%F).dump
+
+# Test restore into a SEPARATE database (never restore over production to test):
+createdb -U portfolioiq portfolioiq_restore_test
+pg_restore -U portfolioiq -d portfolioiq_restore_test --no-owner portfolioiq_2026-09-15.dump
+
+# Production restore (destructive to the target DB — think twice):
+pg_restore -U portfolioiq -d portfolioiq --clean --if-exists portfolioiq_2026-09-15.dump
+```
+More detail: [`docs/DATABASE.md`](docs/DATABASE.md).
+
+---
+
+## Testing
+
+```bash
+cd backend
+npm run typecheck                 # backend typecheck
+npm run build                     # backend production build
+npm run test:ai                   # AI/RAG foundation suite (28)
+npx tsx --test src/services/news/features23.test.ts   # providers/intelligence suite (25)
+npx tsx --test src/ai/research/research.test.ts       # decision-engine suite (15)
+```
+Frontend: `npm run build` (root) includes type checking via the build. See
+[`docs/TESTING.md`](docs/TESTING.md) for the full matrix.
+
+---
+
+## Documentation
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system + module deep-dive
+- [`docs/DATABASE.md`](docs/DATABASE.md) — schema, constraints, stored procedure, backup/restore
+- [`docs/AI_RAG_FOUNDATION.md`](docs/AI_RAG_FOUNDATION.md) — RAG stack, quantization, grounding
+- [`docs/AI_STOCK_RESEARCH.md`](docs/AI_STOCK_RESEARCH.md) — decision framework & methodology
+- [`docs/PROVIDERS_AND_AI_EVENTS.md`](docs/PROVIDERS_AND_AI_EVENTS.md) — provider fallback, alert priority, AI event analysis
+- [`docs/TESTING.md`](docs/TESTING.md) — verification matrix
+- [`docs/DEMO_FLOW.md`](docs/DEMO_FLOW.md) — 10–15 minute demo script
+
+## Known limitations
+
+- AI analysis requires Ollama running locally (~4.5–5.3 GB VRAM with both models); otherwise the AI module reports UNAVAILABLE honestly.
+- Alpha Vantage free tier is end-of-day and rate-limited (25/day) — used strictly as fallback.
+- Historical portfolio value uses the current-holdings view where quantity history doesn't exist (documented in the stored procedure).
+- News sentiment/direction is deterministic and evidence-tagged; it is not a market forecast.

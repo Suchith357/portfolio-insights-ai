@@ -2,9 +2,11 @@ import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Bell,
+  Brain,
   Briefcase,
   ChartCandlestick,
   Eye,
+  Gauge,
   LayoutDashboard,
   LineChart,
   LogOut,
@@ -32,6 +34,8 @@ const NAV = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { to: "/portfolios", label: "Portfolios", icon: Briefcase },
   { to: "/stocks", label: "Stocks", icon: ChartCandlestick },
+  { to: "/intelligence", label: "Intelligence", icon: Brain },
+  { to: "/risk", label: "Risk Diagnosis", icon: Gauge },
   { to: "/watchlist", label: "Watchlist", icon: Eye },
   { to: "/alerts", label: "Alerts", icon: Bell },
   { to: "/profile", label: "Profile", icon: UserIcon },

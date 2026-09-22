@@ -21,11 +21,12 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../utils/prisma.js";
 import { recordAudit } from "../utils/audit.js";
+import { syncBenchmark } from "./benchmark.service.js";
 import {
   fetchFundamentals,
-  fetchHistory,
   RateLimitError,
 } from "./market-data.provider.js";
+import { fetchHistoryWithFallback, fetchFundamentalsWithFallback } from "./market-providers/fallback.js";
 
 export type SyncMode = "LATEST" | "FULL";
 
@@ -110,9 +111,32 @@ async function syncStock(
   };
 
   let quote: import("./market-data.provider.js").ProviderQuote | null = null;
+  /** Provenance of the bars actually stored this run (Feature A fallback). */
+  let storedViaProvider = "YAHOO";
   try {
     const range = mode === "FULL" ? "2y" : "10d";
-    const history = await fetchHistory(yahooSymbol, { range, interval: "1d" });
+
+    // Feature A: multi-provider fallback. Yahoo first; if it fails (or every
+    // bar fails sanity validation) and a secondary provider is configured
+    // (ALPHA_VANTAGE_API_KEY set), the chain walks to it. Provenance of the
+    // provider that answered is recorded on every stored row.
+    const fb = await fetchHistoryWithFallback(stock.symbol, stock.yahoo_symbol, { range });
+    for (const attempt of fb.attempts) {
+      if (!attempt.ok) {
+        console.warn(`[market-data] provider ${attempt.provider} failed for ${stock.symbol}: ${attempt.error} (${attempt.durationMs} ms)`);
+      }
+    }
+    if (!fb.data) {
+      out.failed = true;
+      out.failureStage = "HISTORY";
+      out.failureMessage = fb.attempts.length
+        ? fb.attempts.map((a) => `${a.provider}: ${a.error}`).join(" | ")
+        : "no market-data provider configured";
+      return out;
+    }
+
+    const history = { bars: fb.data.bars, quote: fb.data.quote };
+    storedViaProvider = fb.provider ?? "YAHOO";
     quote = history.quote;
     if (history.bars.length > 0) {
       const windowStart = history.bars[0]!.date;
@@ -144,7 +168,7 @@ async function syncStock(
             low_price: b.low,
             close_price: b.close,
             volume: b.volume,
-            data_source: "YAHOO",
+            data_source: storedViaProvider,
           },
           update: {
             open_price: b.open,
@@ -152,7 +176,7 @@ async function syncStock(
             low_price: b.low,
             close_price: b.close,
             volume: b.volume,
-            data_source: "YAHOO",
+            data_source: storedViaProvider,
           },
         }),
       );
@@ -178,13 +202,13 @@ async function syncStock(
           low_price: lastBar?.low ?? quote.price,
           close_price: quote.price,
           volume: lastBar?.volume ?? null,
-          data_source: "YAHOO",
+          data_source: storedViaProvider,
         },
         update: {
           close_price: quote.price,
           high_price: lastBar ? Math.max(lastBar.high, quote.price) : quote.price,
           low_price: lastBar ? Math.min(lastBar.low, quote.price) : quote.price,
-          data_source: "YAHOO",
+          data_source: storedViaProvider,
         },
       });
       out.bars += 1;
@@ -197,14 +221,17 @@ async function syncStock(
     return out; // nothing else can succeed without price history
   }
 
-  // Master-data updates: name from the quote meta; fundamentals best-effort.
+  // Master-data updates: name from the quote meta; fundamentals best-effort
+  // (Feature A: fundamentals fall back across providers too, but the master
+  // data_source stays the price provider that answered this run).
   try {
     const update: Record<string, unknown> = {
-      data_source: "YAHOO",
+      data_source: storedViaProvider,
       yahoo_symbol: yahooSymbol,
     };
     if (quote?.name) update["company_name"] = quote.name;
-    const fundamentals = await fetchFundamentals(yahooSymbol);
+    const fbFund = await fetchFundamentalsWithFallback(stock.symbol, stock.yahoo_symbol);
+    const fundamentals = fbFund.data;
     if (fundamentals) {
       if (fundamentals.sector) update["sector"] = fundamentals.sector;
       if (fundamentals.industry) update["industry"] = fundamentals.industry;
@@ -212,6 +239,9 @@ async function syncStock(
       if (fundamentals.marketCapCr !== null) update["market_cap"] = fundamentals.marketCapCr;
       if (fundamentals.peRatio !== null) update["pe_ratio"] = fundamentals.peRatio;
       if (fundamentals.dividendYieldPct !== null) update["dividend_yield"] = fundamentals.dividendYieldPct / 100;
+      // Req 2: cache the FY financials document (last two fiscal years +
+      // growth). A provider miss keeps the PREVIOUS cache (stale beats lost).
+      if (fundamentals.financials) update["financials"] = fundamentals.financials;
       update["fundamentals_updated_at"] = new Date();
       out.fundamentals = true;
     }
@@ -273,6 +303,14 @@ export async function runSync(trigger: "SCHEDULED" | "MANUAL" | "STARTUP", mode:
 
     const status: SyncSummary["status"] =
       failures === 0 ? "SUCCESS" : failures < stocksProcessed ? "PARTIAL" : "FAILED";
+
+    // Phase 7: NIFTY benchmark rides the SAME cadence as the stock sync. Its
+    // failure is fully isolated — a benchmark outage must never fail the stock
+    // sync or alter the SyncSummary status. Zero cost: same free Yahoo source.
+    const benchmark = await syncBenchmark();
+    if (benchmark.status === "FAILED") {
+      console.warn(`[market-data] benchmark sync unavailable: ${benchmark.reason}`);
+    }
 
     await prisma.market_data_syncs.update({
       where: { sync_id: sync.sync_id },

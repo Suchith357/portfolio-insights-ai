@@ -255,7 +255,13 @@ export interface AlertDto {
   summary: string;
   source: string;
   whyItMatters: string;
+  /** Req 3: plain-language explanation of this alert type for non-finance users. */
+  meaning?: { what: string; higherMeans: string; lowerMeans: string; conclusion: string };
   isRead: boolean;
+  /** Phase 3: 'ANALYTICS' or 'INTELLIGENCE' (news-event alert). */
+  sourceSystem?: string;
+  /** Intelligence event id when this alert originated from news intelligence. */
+  eventId?: string | null;
 }
 
 /** Maps the alert row plus optional joined stock row to the API shape. */
@@ -271,9 +277,12 @@ export function toAlertDto(
     message: string;
     is_read: boolean;
     created_at: Date;
+    source?: string;
+    intelligence_event_id?: number | null;
   },
   symbol: string | null,
 ): AlertDto {
+  const isIntelligence = a.source === "INTELLIGENCE";
   return {
     id: String(a.alert_id),
     userId: String(a.user_id),
@@ -287,11 +296,60 @@ export function toAlertDto(
       : "LOW") as AlertDto["severity"],
     createdAt: a.created_at.toISOString(),
     summary: a.message,
-    source: "PortfolioIQ engine",
-    whyItMatters:
-      a.portfolio_id !== null
+    source: isIntelligence ? "PortfolioIQ Intelligence" : "PortfolioIQ engine",
+    whyItMatters: isIntelligence
+      ? "News detected by the Intelligence engine may touch this stock in your portfolio. Open the linked event for sources and reasoning."
+      : a.portfolio_id !== null
         ? "This event is linked to one of your portfolios, so it may affect your measured risk and diversification."
         : "This event is linked to a stock on your radar; review its impact on your exposure.",
     isRead: a.is_read,
+    /** Phase 3: provenance + link to the originating intelligence event. */
+    sourceSystem: isIntelligence ? "INTELLIGENCE" : "ANALYTICS",
+    eventId: a.intelligence_event_id === null || a.intelligence_event_id === undefined ? null : String(a.intelligence_event_id),
+    /** Req 3: plain-language meaning + outcome guidance per alert type. */
+    meaning: PLAIN_LANGUAGE[a.alert_type] ?? {
+      what: "PortfolioIQ generated this alert from your own portfolio data.",
+      higherMeans: "What it means for you depends on the details in the alert message above.",
+      lowerMeans: "Read the message and open the linked stock or event for context.",
+      conclusion: "Review the alert details to decide whether any action makes sense for you.",
+    },
   };
 }
+
+/**
+ * Req 3: plain-language explanations per alert_type. Short, professional,
+ * non-condescending: what the value measures, what higher/lower mean, and a
+ * reasonable conclusion. No advice — the conclusion is always contextual.
+ */
+const PLAIN_LANGUAGE: Record<string, { what: string; higherMeans: string; lowerMeans: string; conclusion: string }> = {
+  CONCENTRATION: {
+    what: "Shows how much of this portfolio's value sits in its single largest stock.",
+    higherMeans: "A higher share means results depend more on one company — good when it rises, painful when it falls.",
+    lowerMeans: "A lower share means gains and losses are spread across more companies.",
+    conclusion: "If one stock is much heavier than the rest, your portfolio's fortunes move mostly with that company.",
+  },
+  HIGH_RISK: {
+    what: "Measures overall portfolio risk from volatility and past drawdowns, on a 0–100 scale.",
+    higherMeans: "Higher scores mean the portfolio's value tends to swing more — larger potential gains, larger potential losses.",
+    lowerMeans: "Lower scores mean steadier day-to-day value with smaller swings.",
+    conclusion: "A high score suggests sizing positions so a bad month would not force you to sell.",
+  },
+  LOW_DIVERSIFICATION: {
+    what: "Rates how spread out your value is across stocks and sectors, 0–100.",
+    higherMeans: "A higher score would mean better spread; this alert fires because yours is low.",
+    lowerMeans: "A lower score means value is bunched in few stocks or one sector, so a single event can hit everything at once.",
+    conclusion: "Spreading value across unrelated sectors usually softens the impact of any one piece of bad news.",
+  },
+  MARKET_ANOMALY: {
+    what: "A statistical flag: today's move was far outside this stock's (or sector's) own recent behaviour.",
+    higherMeans: "A bigger deviation from normal — worth understanding, but not automatically good or bad.",
+    lowerMeans: "A smaller deviation — closer to this stock's everyday behaviour.",
+    conclusion: "Unusual moves often have a news reason; check the Intelligence feed before reacting.",
+  },
+  NEWS_EVENT: {
+    what: "An event detected in the news that plausibly touches a stock or sector you hold or watch.",
+    higherMeans: "Greater relevance/importance to your holdings — worth reading sooner.",
+    lowerMeans: "Lower relevance — context worth knowing, likely not urgent.",
+    conclusion: "Open the linked event to see the sources, your exposure, and what to monitor.",
+  },
+};

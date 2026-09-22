@@ -218,10 +218,11 @@ export function riskBand(volatilityPct: number | null): RiskBand {
  * statistic (e.g. 500%+ "volatility"). YAHOO is preferred when present.
  */
 export function latestHomogeneousSegment(series: PricePoint[], sourceByDate?: Map<string, string>): PricePoint[] {
-  if (!sourceByDate || sourceByDate.size === 0) return series;
+  if (!sourceByDate || sourceByDate.size === 0 || series.length === 0) return series;
   // Walk back from the newest bar and find where the source flips.
-  const newestSource = sourceByDate.get(series[series.length - 1]?.date ?? "");
-  let cut = series.length;
+  // Default of 0 means "no flip found → the whole series is homogeneous".
+  const newestSource = sourceByDate.get(series[series.length - 1]!.date);
+  let cut = 0;
   for (let i = series.length - 1; i >= 0; i--) {
     if (sourceByDate.get(series[i]!.date) !== newestSource) {
       cut = i + 1;

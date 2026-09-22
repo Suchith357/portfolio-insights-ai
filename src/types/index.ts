@@ -126,6 +126,13 @@ export interface Alert {
   summary: string;
   source: string;
   whyItMatters: string;
+  /** Req 3: plain-language meaning of the alert type (what/higher/lower/conclusion). */
+  meaning?: {
+    what: string;
+    higherMeans: string;
+    lowerMeans: string;
+    conclusion: string;
+  };
   /** True once the user has acknowledged the alert. */
   isRead?: boolean;
 }

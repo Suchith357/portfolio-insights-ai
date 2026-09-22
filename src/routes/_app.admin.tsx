@@ -87,6 +87,33 @@ function AdminConsole() {
     },
   });
 
+  const intelStatus = useQuery({
+    queryKey: ["admin", "intelligence", "status"],
+    queryFn: adminService.getIntelligenceStatus,
+    refetchInterval: 30000,
+  });
+  const intelNews = useQuery({
+    queryKey: ["admin", "intelligence", "news"],
+    queryFn: () => adminService.getIntelligenceRecentNews(12),
+  });
+  const intelEvents = useQuery({
+    queryKey: ["admin", "intelligence", "events"],
+    queryFn: () => adminService.getIntelligenceRecentEvents(10),
+  });
+  const intelFetch = useMutation({
+    mutationFn: () => adminService.triggerIntelligenceFetch(6),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin", "intelligence", "status"] });
+      window.setTimeout(() => void qc.invalidateQueries({ queryKey: ["admin", "intelligence"] }), 8000);
+    },
+  });
+  const intelCleanup = useMutation({
+    mutationFn: () => adminService.triggerIntelligenceCleanup(),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["admin", "intelligence"] });
+    },
+  });
+
   const last = syncStatus.data?.last ?? null;
   const syncBadgeTone =
     !last || last.status === "FAILED"
@@ -145,6 +172,7 @@ function AdminConsole() {
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="stocks">Stock catalogue</TabsTrigger>
           <TabsTrigger value="market-data">Market data</TabsTrigger>
+          <TabsTrigger value="intelligence">Intelligence</TabsTrigger>
           <TabsTrigger value="audit">Audit log</TabsTrigger>
         </TabsList>
 
@@ -305,6 +333,158 @@ function AdminConsole() {
               )}
             </div>
           )}
+        </TabsContent>
+
+        <TabsContent value="intelligence" className="space-y-4 pt-4">
+          <SectionHeader
+            title="News intelligence — Phase 1 foundation"
+            description="Ephemeral news ingestion (deduplicated, TTL-bound, matched to the managed stock universe). Raw rows expire automatically; only structured events may outlive them."
+          />
+          {intelStatus.isLoading ? (
+            <TableSkeleton rows={4} />
+          ) : intelStatus.isError ? (
+            <ErrorState title="We couldn't load intelligence status" onRetry={() => intelStatus.refetch()} />
+          ) : intelStatus.data ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <Badge
+                  variant="outline"
+                  className={`text-[10px] ${intelStatus.data.provider.available ? "text-gain" : "text-warning"}`}
+                >
+                  {intelStatus.data.provider.available
+                    ? `Provider: ${intelStatus.data.provider.active}`
+                    : "Provider unavailable"}
+                </Badge>
+                {intelStatus.data.provider.degradedFrom && (
+                  <span className="text-xs text-warning">
+                    degraded from {intelStatus.data.provider.degradedFrom} — {intelStatus.data.provider.issues.join(" ")}
+                  </span>
+                )}
+                <Button
+                  size="sm"
+                  onClick={() => intelFetch.mutate()}
+                  disabled={intelFetch.isPending || intelStatus.data.ingest.running}
+                >
+                  {intelFetch.isPending
+                    ? "Starting…"
+                    : intelStatus.data.ingest.running
+                      ? "Fetch running…"
+                      : "Fetch news now"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => intelCleanup.mutate()}
+                  disabled={intelCleanup.isPending}
+                >
+                  {intelCleanup.isPending ? "Cleaning…" : "Run cleanup now"}
+                </Button>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <StatCard
+                  label="Articles stored"
+                  value={String(intelStatus.data.counts.articles)}
+                  sub={`${intelStatus.data.counts.expiredArticles} awaiting cleanup`}
+                />
+                <StatCard
+                  label="Matched entities"
+                  value={String(intelStatus.data.counts.entities)}
+                  sub="linked to catalogue stocks"
+                />
+                <StatCard
+                  label="Basic events"
+                  value={String(intelStatus.data.counts.events)}
+                  sub={`${intelStatus.data.counts.expiredEvents} awaiting cleanup`}
+                />
+                <StatCard
+                  label="Raw-news TTL"
+                  value={`${intelStatus.data.retention.rawNewsRetentionHours}h`}
+                  sub={`cleanup every ${intelStatus.data.retention.cleanupIntervalMinutes} min`}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Last fetch: {intelStatus.data.ingest.lastFetchAt ? formatDateTime(intelStatus.data.ingest.lastFetchAt) : "never"}
+                {intelStatus.data.retention.nextFetchAt
+                  ? ` · next scheduled: ${formatDateTime(intelStatus.data.retention.nextFetchAt)}`
+                  : ""}
+                {intelStatus.data.lastCleanup
+                  ? ` · last cleanup ${formatDateTime(intelStatus.data.lastCleanup.ranAt)} removed ${intelStatus.data.lastCleanup.articlesDeleted} articles / ${intelStatus.data.lastCleanup.eventsDeleted} events`
+                  : ""}
+              </p>
+              {intelNews.isLoading ? (
+                <TableSkeleton rows={3} />
+              ) : intelNews.isError ? (
+                <ErrorState title="We couldn't load recent news" onRetry={() => intelNews.refetch()} />
+              ) : (intelNews.data ?? []).length === 0 ? (
+                <EmptyState
+                  title="No news ingested yet"
+                  description="Use “Fetch news now” or wait for the scheduled cycle."
+                />
+              ) : (
+                <div className="panel overflow-x-auto">
+                  <table className="w-full min-w-[680px] text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="px-4 py-3 font-medium">Published</th>
+                        <th className="px-4 py-3 font-medium">Headline</th>
+                        <th className="px-4 py-3 font-medium">Matched stocks</th>
+                        <th className="px-4 py-3 font-medium">Expires</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(intelNews.data ?? []).map((a) => (
+                        <tr key={a.id} className="border-b border-border/60 last:border-0">
+                          <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTime(a.publishedAt)}</td>
+                          <td className="px-4 py-3">
+                            <a
+                              href={a.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="line-clamp-1 hover:underline"
+                            >
+                              {a.title}
+                            </a>
+                            <span className="text-xs text-muted-foreground"> · {a.sourceName ?? a.provider}</span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-wrap gap-1">
+                              {a.matchedStocks.length === 0 ? (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              ) : (
+                                a.matchedStocks.map((m) => (
+                                  <Badge key={`${a.id}-${m.symbol ?? m.entityName}`} variant="outline" className="text-[10px]">
+                                    {m.symbol ?? m.entityName}
+                                    {m.sentimentLabel ? ` · ${m.sentimentLabel.toLowerCase()}` : ""}
+                                  </Badge>
+                                ))
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTime(a.expiresAt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {intelEvents.isError ? null : (intelEvents.data ?? []).length > 0 ? (
+                <div className="panel p-4">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Recent basic events</p>
+                  <ul className="mt-2 space-y-2">
+                    {(intelEvents.data ?? []).map((e) => (
+                      <li key={e.id} className="flex flex-wrap items-center gap-2 text-sm">
+                        <Badge variant="outline" className="text-[10px]">{e.category}</Badge>
+                        <span className="line-clamp-1">{e.title}</span>
+                        <span className="text-xs text-muted-foreground">
+                          severity {e.severity ?? "—"} · confidence {e.confidence !== null ? `${Math.round(e.confidence * 100)}%` : "—"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </TabsContent>
 
         <TabsContent value="audit" className="space-y-4 pt-4">

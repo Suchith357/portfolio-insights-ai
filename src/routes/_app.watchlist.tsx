@@ -20,6 +20,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import * as watchlistService from "@/services/watchlist.service";
 import * as alertService from "@/services/alert.service";
+import * as intelligenceService from "@/services/intelligence.service";
 
 export const Route = createFileRoute("/_app/watchlist")({
   head: () => ({
@@ -58,6 +59,20 @@ function WatchlistPage() {
     queryFn: () => alertService.listAlertsForSymbols(symbols),
     enabled: symbols.length > 0,
   });
+
+  // Phase 3: intelligence indicator — recent events per watched stock.
+  const intelSummaries = useQuery({
+    queryKey: ["intelligence", "summary"],
+    queryFn: () => intelligenceService.getMySummary(),
+    enabled: symbols.length > 0,
+  });
+  const intelBySymbol = useMemo(() => {
+    const map = new Map<string, { events: number; severity: string | null; direction: string | null }>();
+    for (const s of intelSummaries.data?.stockSummaries ?? []) {
+      map.set(s.symbol, { events: s.relevantEvents, severity: s.latestSeverity, direction: s.latestDirection });
+    }
+    return map;
+  }, [intelSummaries.data]);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["watchlist"] });
 
@@ -146,6 +161,7 @@ function WatchlistPage() {
                 <th className="px-4 py-3 font-medium">Volatility</th>
                 <th className="px-4 py-3 font-medium">Risk band</th>
                 <th className="px-4 py-3 font-medium">Alerts</th>
+                <th className="px-4 py-3 font-medium">Intelligence</th>
                 <th className="px-4 py-3 font-medium">Added</th>
                 <th className="px-4 py-3" />
               </tr>
@@ -193,6 +209,33 @@ function WatchlistPage() {
                       ) : (
                         <span className="text-xs text-muted-foreground">None</span>
                       )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const intel = intelBySymbol.get(item.symbol);
+                        if (!intel || intel.events === 0)
+                          return <span className="text-xs text-muted-foreground">—</span>;
+                        const sevBadge =
+                          intel.severity === "HIGH" || intel.severity === "CRITICAL" ? (
+                            <span className="num text-xs font-semibold text-warning">{intel.events} high-impact</span>
+                          ) : (
+                            <span className="num text-xs">{intel.events} recent</span>
+                          );
+                        return (
+                          <span className="flex items-center gap-1.5">
+                            <span
+                              className={cn(
+                                "h-2 w-2 rounded-full",
+                                intel.severity === "HIGH" || intel.severity === "CRITICAL"
+                                  ? "bg-loss"
+                                  : "bg-info",
+                              )}
+                              aria-hidden
+                            />
+                            {sevBadge}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{formatDate(item.addedAt)}</td>
                     <td className="px-4 py-3 text-right">

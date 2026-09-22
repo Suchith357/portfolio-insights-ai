@@ -21,6 +21,7 @@ model users {
   audit_logs    audit_logs[]
   portfolios    portfolios[]
   watchlists    watchlists[]
+  intelligence_portfolio_impacts intelligence_portfolio_impacts[]
 }
 
 model portfolios {
@@ -35,8 +36,8 @@ model portfolios {
   portfolio_analysis portfolio_analysis[]
   users              users                @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "portfolios_user_fk")
   transactions       transactions[]
-
-  @@index([user_id], map: "idx_portfolios_user_id")
+  intelligence_portfolio_impacts intelligence_portfolio_impacts[]
+  risk_snapshots            portfolio_risk_snapshots[]
 }
 
 model stocks {
@@ -57,13 +58,18 @@ model stocks {
   data_source    String         @default("DEMO") @db.VarChar(20)
   /// Last successful fundamentals (P/E, market cap, yield) refresh.
   fundamentals_updated_at DateTime? @db.Timestamp(6)
+  /// Req 2: cached FY financials (last 2 annual statements + growth) from Yahoo.
+  financials              Json?
   created_at     DateTime       @default(now()) @db.Timestamp(6)
   updated_at     DateTime       @default(now()) @updatedAt @db.Timestamp(6)
   alerts         alerts[]
   holdings       holdings[]
   stock_prices   stock_prices[]
-  transactions   transactions[]
-  watchlists     watchlists[]
+  transactions              transactions[]
+  watchlists                watchlists[]
+  intelligence_news_entities    intelligence_news_entities[]
+  intelligence_event_entities   intelligence_event_entities[]
+  intelligence_portfolio_impacts intelligence_portfolio_impacts[]
 
   @@unique([symbol, exchange], map: "stocks_symbol_exchange_unique")
   @@index([sector], map: "idx_stocks_sector")
@@ -142,11 +148,22 @@ model alerts {
   message      String
   is_read      Boolean     @default(false)
   created_at   DateTime    @default(now()) @db.Timestamp(6)
+  /// Provenance: 'ANALYTICS' (analytics engine) or 'INTELLIGENCE' (news event).
+  source       String      @default("ANALYTICS") @db.VarChar(20)
+  /// Optional link to the originating intelligence event (kept when the event expires).
+  intelligence_event_id  Int?
+  /// Optional link to the Phase 2 impact row that triggered this alert.
+  intelligence_impact_id Int?
   portfolios   portfolios? @relation(fields: [portfolio_id], references: [portfolio_id], onDelete: Cascade, onUpdate: NoAction, map: "alerts_portfolio_fk")
   stocks       stocks?     @relation(fields: [stock_id], references: [stock_id], onDelete: Cascade, onUpdate: NoAction, map: "alerts_stock_fk")
   users        users       @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "alerts_user_fk")
+  intelligence_event      intelligence_news_events?        @relation(fields: [intelligence_event_id], references: [event_id], onDelete: SetNull, onUpdate: NoAction, map: "alerts_intelligence_event_fk")
+  intelligence_impact     intelligence_portfolio_impacts?  @relation(fields: [intelligence_impact_id], references: [impact_id], onDelete: SetNull, onUpdate: NoAction, map: "alerts_intelligence_impact_fk")
 
   @@index([user_id, is_read], map: "idx_alerts_user_read")
+  @@index([intelligence_event_id], map: "idx_alerts_intel_event")
+  @@index([user_id, source], map: "idx_alerts_user_source")
+  @@index([user_id, is_read, created_at(sort: Desc)], map: "idx_alerts_user_unread_created")
 }
 
 model portfolio_analysis {
@@ -163,6 +180,70 @@ model portfolio_analysis {
   portfolios            portfolios @relation(fields: [portfolio_id], references: [portfolio_id], onDelete: Cascade, onUpdate: NoAction, map: "portfolio_analysis_portfolio_fk")
 
   @@index([portfolio_id, analyzed_at], map: "idx_analysis_portfolio_date")
+}
+
+/// Benchmark index for relative performance (e.g. NIFTY 50 via ^NSEI).
+model benchmarks {
+  benchmark_id Int      @id @default(autoincrement())
+  symbol       String   @db.VarChar(30)
+  name         String   @db.VarChar(100)
+  exchange     String   @default("NSE") @db.VarChar(20)
+  data_source  String   @default("YAHOO") @db.VarChar(20)
+  is_active    Boolean  @default(true)
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+  updated_at   DateTime @default(now()) @updatedAt @db.Timestamp(6)
+  prices       benchmark_prices[]
+
+  @@unique([symbol, exchange], map: "benchmarks_symbol_exchange_unique")
+}
+
+/// Daily OHLC history for a benchmark. UNIQUE(benchmark, date) prevents duplicates.
+model benchmark_prices {
+  benchmark_price_id Int      @id @default(autoincrement())
+  benchmark_id    Int
+  price_date      DateTime @db.Date
+  open_price      Decimal? @db.Decimal(18, 2)
+  high_price      Decimal? @db.Decimal(18, 2)
+  low_price       Decimal? @db.Decimal(18, 2)
+  close_price     Decimal  @db.Decimal(18, 2)
+  volume          BigInt?
+  data_source     String   @default("YAHOO") @db.VarChar(20)
+  created_at      DateTime @default(now()) @db.Timestamp(6)
+  benchmarks      benchmarks @relation(fields: [benchmark_id], references: [benchmark_id], onDelete: Cascade, onUpdate: NoAction, map: "benchmark_prices_benchmark_fk")
+
+  @@unique([benchmark_id, price_date], map: "benchmark_prices_benchmark_date_unique")
+  @@index([benchmark_id, price_date], map: "idx_benchmark_prices_date")
+}
+
+/// Derived daily risk metrics per portfolio (cache, never overwritten once written).
+model portfolio_risk_snapshots {
+  snapshot_id           Int      @id @default(autoincrement())
+  portfolio_id          Int
+  snapshot_date         DateTime @db.Date
+  calculation_version   String   @default("risk-v1") @db.VarChar(20)
+  volatility            Decimal? @db.Decimal(10, 6)
+  downside_deviation    Decimal? @db.Decimal(10, 6)
+  sharpe                Decimal? @db.Decimal(10, 6)
+  sortino               Decimal? @db.Decimal(10, 6)
+  calmar                Decimal? @db.Decimal(10, 6)
+  max_drawdown          Decimal? @db.Decimal(10, 6)
+  var_95                Decimal? @db.Decimal(10, 6)
+  var_99                Decimal? @db.Decimal(10, 6)
+  cvar_95               Decimal? @db.Decimal(10, 6)
+  beta                  Decimal? @db.Decimal(10, 6)
+  alpha                 Decimal? @db.Decimal(10, 6)
+  hhi                   Decimal? @db.Decimal(10, 6)
+  effective_positions   Decimal? @db.Decimal(10, 4)
+  diversification_ratio Decimal? @db.Decimal(10, 6)
+  benchmark_symbol      String?  @db.VarChar(30)
+  observation_count     Int?
+  data_source           String?  @db.VarChar(20)
+  priced_as_of          DateTime? @db.Date
+  created_at            DateTime @default(now()) @db.Timestamp(6)
+  portfolios            portfolios @relation(fields: [portfolio_id], references: [portfolio_id], onDelete: Cascade, onUpdate: NoAction, map: "risk_snapshots_portfolio_fk")
+
+  @@unique([portfolio_id, snapshot_date, calculation_version], map: "risk_snapshots_unique")
+  @@index([portfolio_id, snapshot_date(sort: Desc)], map: "idx_risk_snapshots_portfolio_date")
 }
 
 /// One row per market-data refresh run (scheduled or manual).
@@ -193,4 +274,158 @@ model audit_logs {
   users       users?   @relation(fields: [user_id], references: [user_id], onUpdate: NoAction, map: "audit_logs_user_fk")
 
   @@index([user_id], map: "idx_audit_logs_user_id")
+}
+
+// =============================================================================
+// Intelligence Engine — PHASE 1 news data foundation (ephemeral by design).
+// Raw news lives for a configurable TTL (default 72h) and is removed by the
+// cleanup service; only structured event rows may outlive their articles.
+// =============================================================================
+
+/// Temporary normalized provider news. Unique per (provider, provider_article_id).
+model intelligence_news_articles {
+  article_id        Int                          @id @default(autoincrement())
+  provider          String                       @db.VarChar(30)
+  provider_article_id String                     @db.VarChar(255)
+  title             String                       @db.VarChar(500)
+  description       String?
+  url               String
+  source_name       String?                      @db.VarChar(150)
+  language          String?                      @db.VarChar(20)
+  published_at      DateTime                     @db.Timestamp(6)
+  received_at       DateTime                     @default(now()) @db.Timestamp(6)
+  fetched_at        DateTime                     @default(now()) @db.Timestamp(6)
+  /// When the cleanup service may delete this raw-news row (TTL from env).
+  expires_at        DateTime                     @db.Timestamp(6)
+  processed_at      DateTime?                    @db.Timestamp(6)
+  processing_status String                       @default("PENDING") @db.VarChar(20)
+  raw_metadata      Json?
+  created_at        DateTime                     @default(now()) @db.Timestamp(6)
+  updated_at        DateTime                     @default(now()) @updatedAt @db.Timestamp(6)
+  entities          intelligence_news_entities[]
+
+  @@unique([provider, provider_article_id], map: "intelligence_news_articles_provider_article_unique")
+  @@index([published_at(sort: Desc)], map: "idx_intel_news_published")
+  @@index([expires_at], map: "idx_intel_news_expires")
+  @@index([processing_status], map: "idx_intel_news_status")
+}
+
+/// Provider-reported or rule-matched entities tied to an ephemeral article.
+model intelligence_news_entities {
+  entity_id        Int      @id @default(autoincrement())
+  article_id       Int
+  stock_id         Int?
+  matched_symbol   String?  @db.VarChar(20)
+  entity_name      String   @db.VarChar(200)
+  entity_type      String   @default("COMPANY") @db.VarChar(30)
+  relevance_score  Decimal? @db.Decimal(6, 4)
+  sentiment_score  Decimal? @db.Decimal(6, 4)
+  sentiment_label  String?  @db.VarChar(20)
+  /// Phase 3 explainable matching tier: VERY_HIGH..LOW (from evidence basis).
+  match_confidence String?  @db.VarChar(12)
+  provider_metadata Json?
+  created_at       DateTime @default(now()) @db.Timestamp(6)
+  article          intelligence_news_articles @relation(fields: [article_id], references: [article_id], onDelete: Cascade, onUpdate: NoAction, map: "intelligence_news_entities_article_fk")
+  stock            stocks?                    @relation(fields: [stock_id], references: [stock_id], onDelete: SetNull, onUpdate: NoAction, map: "intelligence_news_entities_stock_fk")
+
+  @@index([article_id], map: "idx_intel_news_entities_article")
+  @@index([stock_id], map: "idx_intel_news_entities_stock")
+}
+
+/// Basic structured event derived from matched news (rule-based in Phase 1).
+model intelligence_news_events {
+  event_id           Int      @id @default(autoincrement())
+  category           String   @db.VarChar(30)
+  title              String   @db.VarChar(500)
+  summary            String?
+  detected_at        DateTime @default(now()) @db.Timestamp(6)
+  event_time         DateTime? @db.Timestamp(6)
+  severity           Int?
+  relevance          Decimal? @db.Decimal(6, 4)
+  confidence         Decimal? @db.Decimal(5, 4)
+  status             String   @default("NEW") @db.VarChar(20)
+  /// Phase 3 lifecycle: NEW → UPDATED (new evidence) → PROCESSED (impacts
+  /// built) → RESOLVED/EXPIRED. PROCESSED/ARCHIVED/DISMISSED remain valid.
+  source_article_ids Json?
+  /// Phase 3 enrichment: supporting-article count and distinct source names.
+  article_count      Int      @default(0)
+  source_names       Json?
+  /// How many times material new evidence updated this event.
+  material_updates   Int      @default(0)
+  /// Feature B: cached (versioned) AI assessment for important events.
+  ai_analysis        Json?
+  expires_at         DateTime? @db.Timestamp(6)
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+  updated_at         DateTime @default(now()) @updatedAt @db.Timestamp(6)
+  event_entities     intelligence_event_entities[]
+  portfolio_impacts  intelligence_portfolio_impacts[]
+  alerts             alerts[]
+
+  @@index([detected_at(sort: Desc)], map: "idx_intel_events_detected")
+  @@index([category], map: "idx_intel_events_category")
+  @@index([severity], map: "idx_intel_events_severity")
+  @@index([expires_at], map: "idx_intel_events_expires")
+  @@index([status], map: "idx_intel_events_status")
+  @@index([updated_at(sort: Desc)], map: "idx_intel_events_updated")
+}
+
+/// Event ↔ affected entity/stock mapping.
+model intelligence_event_entities {
+  event_entity_id   Int      @id @default(autoincrement())
+  event_id          Int
+  stock_id          Int?
+  entity_name       String   @db.VarChar(200)
+  relationship_type String   @default("DIRECT") @db.VarChar(20)
+  relevance         Decimal? @db.Decimal(6, 4)
+  direction         String?  @db.VarChar(10)
+  confidence        Decimal? @db.Decimal(5, 4)
+  /// Phase 3 explainable matching tier: VERY_HIGH..LOW (from evidence basis).
+  match_confidence  String?  @db.VarChar(12)
+  created_at        DateTime @default(now()) @db.Timestamp(6)
+  event             intelligence_news_events @relation(fields: [event_id], references: [event_id], onDelete: Cascade, onUpdate: NoAction, map: "intelligence_event_entities_event_fk")
+  stock             stocks?                  @relation(fields: [stock_id], references: [stock_id], onDelete: SetNull, onUpdate: NoAction, map: "intelligence_event_entities_stock_fk")
+
+  @@index([event_id], map: "idx_intel_event_entities_event")
+  @@index([stock_id], map: "idx_intel_event_entities_stock")
+}
+
+/// Portfolio-aware event intelligence (Phase 2): EVENT → USER → PORTFOLIO →
+/// EXPOSURE → ALERT CANDIDATE. Deterministically idempotent via the
+/// uq_intel_impact_dedup functional unique index (COALESCE of nullable keys).
+model intelligence_portfolio_impacts {
+  impact_id             Int      @id @default(autoincrement())
+  event_id              Int
+  user_id               Int
+  /// NULL = user-level or watchlist impact (not tied to one portfolio).
+  portfolio_id          Int?
+  /// NULL = user-level/macro impact (not tied to one stock).
+  stock_id              Int?
+  exposure_type         String   @db.VarChar(20)
+  /// Share of the portfolio's market value exposed to this stock (0..1).
+  portfolio_weight      Decimal? @db.Decimal(6, 4)
+  /// Share of the portfolio exposed to the affected SECTOR (0..1).
+  sector_weight         Decimal? @db.Decimal(6, 4)
+  /// User-level aggregate weight across all portfolios (0..1).
+  user_aggregate_weight Decimal? @db.Decimal(6, 4)
+  direction             String?  @db.VarChar(10)
+  impact_severity       String   @db.VarChar(10)
+  alert_candidate       String   @default("NO_ALERT") @db.VarChar(20)
+  relevance             Decimal? @db.Decimal(5, 4)
+  confidence            Decimal? @db.Decimal(5, 4)
+  explanation           String?
+  /// Valuation freshness: the price date used for exposure maths.
+  price_as_of           DateTime? @db.Date
+  detected_at           DateTime @default(now()) @db.Timestamp(6)
+  created_at            DateTime @default(now()) @db.Timestamp(6)
+  updated_at            DateTime @default(now()) @updatedAt @db.Timestamp(6)
+  event                 intelligence_news_events @relation(fields: [event_id], references: [event_id], onDelete: Cascade, onUpdate: NoAction, map: "intelligence_portfolio_impacts_event_fk")
+  alert_refs            alerts[]
+  user                  users                    @relation(fields: [user_id], references: [user_id], onDelete: Cascade, onUpdate: NoAction, map: "intelligence_portfolio_impacts_user_fk")
+  portfolio             portfolios?              @relation(fields: [portfolio_id], references: [portfolio_id], onDelete: Cascade, onUpdate: NoAction, map: "intelligence_portfolio_impacts_portfolio_fk")
+  stock                 stocks?                  @relation(fields: [stock_id], references: [stock_id], onDelete: SetNull, onUpdate: NoAction, map: "intelligence_portfolio_impacts_stock_fk")
+
+  @@index([user_id, created_at(sort: Desc)], map: "idx_intel_impacts_user_created")
+  @@index([event_id], map: "idx_intel_impacts_event")
+  @@index([stock_id], map: "idx_intel_impacts_stock")
+  @@index([user_id, alert_candidate], map: "idx_intel_impacts_user_alert")
 }

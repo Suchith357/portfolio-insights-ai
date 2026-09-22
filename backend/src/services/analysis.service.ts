@@ -1,6 +1,6 @@
 import { prisma } from "../utils/prisma.js";
 import { latestHomogeneousSegment } from "./analytics.service.js";
-import { notFound } from "../utils/http.js";
+import { notFound, forbidden } from "../utils/http.js";
 import { recordAudit } from "../utils/audit.js";
 import { toHoldingDto, type HoldingDto } from "../utils/mappers.js";
 import {
@@ -590,4 +590,46 @@ function buildDeltas(before: PortfolioMetrics, after: PortfolioMetrics): BuySimu
 
 function clamp(min: number, max: number, v: number) {
   return Math.min(max, Math.max(min, v));
+}
+
+/**
+ * POST /api/analysis/:id/refresh — invoke the PostgreSQL stored procedure
+ * sp_refresh_portfolio_analysis (see prisma/sql/2026_09_15_sp_refresh_portfolio_analysis.sql).
+ *
+ * The procedure recomputes a portfolio summary snapshot entirely in-database
+ * from stock_prices x holdings and APPENDS one row to portfolio_analysis.
+ * It never deletes or overwrites history. Ownership is enforced here: the
+ * portfolio must belong to userId (admins may refresh any portfolio).
+ */
+export async function refreshPortfolioAnalysisViaProcedure(userId: number, portfolioId: number, isAdmin: boolean) {
+  const portfolio = await prisma.portfolios.findUnique({ where: { portfolio_id: portfolioId } });
+  if (!portfolio) throw notFound("Portfolio not found.");
+  if (!isAdmin && portfolio.user_id !== userId) {
+    throw forbidden("You don't have access to this portfolio.");
+  }
+
+  const before = await prisma.portfolio_analysis.count({ where: { portfolio_id: portfolioId } });
+
+  // Parameters are bound ($1::int, $2::date) — no string interpolation.
+  await prisma.$executeRawUnsafe(
+    "CALL public.sp_refresh_portfolio_analysis($1::int, $2::date)",
+    portfolioId,
+    null,
+  );
+
+  const row = await prisma.portfolio_analysis.findFirst({
+    where: { portfolio_id: portfolioId },
+    orderBy: { analyzed_at: "desc" },
+  });
+  const after = await prisma.portfolio_analysis.count({ where: { portfolio_id: portfolioId } });
+
+  await recordAudit({
+    userId,
+    action: "ANALYSIS_SNAPSHOT",
+    entityType: "portfolio_analysis",
+    entityId: portfolioId,
+    details: `via=sp_refresh_portfolio_analysis appended=${after - before}`,
+  });
+
+  return { portfolioId, appended: after - before, snapshot: row };
 }

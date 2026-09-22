@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, HelpCircle, TrendingDown, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -30,11 +30,16 @@ import { formatCurrency, formatCurrencyOrNull, formatDate, formatPct } from "@/l
 import { explainBuySimulation } from "@/lib/ai-insights";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { Brain, ExternalLink } from "lucide-react";
+import * as researchService from "@/services/research.service";
+import type { ResearchReport } from "@/services/research.service";
+import { AiResearchPanel } from "@/components/stock/ai-research-panel";
 import * as stockService from "@/services/stock.service";
 import * as portfolioService from "@/services/portfolio.service";
 import * as watchlistService from "@/services/watchlist.service";
 import * as alertService from "@/services/alert.service";
 import * as analysisService from "@/services/analysis.service";
+import * as intelligenceService from "@/services/intelligence.service";
 import type { Holding } from "@/types";
 
 export const Route = createFileRoute("/_app/stocks/$symbol")({
@@ -108,6 +113,14 @@ function StockDetail() {
   const alerts = useQuery({
     queryKey: ["alerts", upper],
     queryFn: () => alertService.listAlertsForSymbols([upper]),
+  });
+
+  // Phase 3: recent intelligence events linked to this stock (evidence-backed).
+  const stockId = detail.data?.stock.id ?? null;
+  const stockIntel = useQuery({
+    queryKey: ["intelligence", "stock", stockId],
+    queryFn: () => intelligenceService.getStockIntelligence(stockId!, 5),
+    enabled: stockId !== null,
   });
 
   const watchItem = watchlist.data?.find((w) => w.symbol === upper);
@@ -450,11 +463,79 @@ function StockDetail() {
         )}
       </section>
 
+      {/* Phase 3: recent intelligence for this stock (additive section). */}
+      {stockIntel.data && stockIntel.data.recentEventCount > 0 && (
+        <section className="panel p-4" data-testid="stock-intelligence">
+          <SectionHeader
+            title="Recent intelligence"
+            description="News events linked to this stock by the Intelligence engine. Descriptive only — never a prediction or advice."
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <span>
+              {stockIntel.data.recentEventCount} recent event{stockIntel.data.recentEventCount === 1 ? "" : "s"}
+            </span>
+            {stockIntel.data.latest && (
+              <>
+                <Badge variant="outline" className="text-[10px]">
+                  latest: {stockIntel.data.latest.category.toLowerCase()}
+                </Badge>
+                {stockIntel.data.latest.relationshipType === "SECTOR" ? (
+                  <Badge variant="outline" className="text-[10px]">
+                    sector exposure
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[10px]">
+                    direct link
+                  </Badge>
+                )}
+                <span className="flex items-center gap-1">
+                  {stockIntel.data.latest.direction === "POSITIVE" ? (
+                    <TrendingUp className="h-3.5 w-3.5 text-gain" aria-hidden />
+                  ) : stockIntel.data.latest.direction === "NEGATIVE" ? (
+                    <TrendingDown className="h-3.5 w-3.5 text-loss" aria-hidden />
+                  ) : (
+                    <HelpCircle className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+                  )}
+                  {stockIntel.data.latest.direction ?? "UNCERTAIN"}
+                </span>
+                <span>
+                  confidence{" "}
+                  {stockIntel.data.latest.confidence === null
+                    ? "—"
+                    : stockIntel.data.latest.confidence >= 0.8
+                      ? "HIGH"
+                      : stockIntel.data.latest.confidence >= 0.55
+                        ? "MEDIUM"
+                        : "LOW"}
+                </span>
+                <span>detected {formatDate(stockIntel.data.latest.detectedAt)}</span>
+              </>
+            )}
+          </div>
+          <ul className="mt-3 space-y-2">
+            {stockIntel.data.events.slice(0, 3).map((e) => (
+              <li key={e.eventId} className="flex flex-wrap items-center gap-2 text-sm">
+                <Badge variant="outline" className="text-[10px]">
+                  {e.category.toLowerCase()}
+                </Badge>
+                <span className="line-clamp-1">{e.title}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{formatDate(e.detectedAt)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <Tabs defaultValue="simulate">
         <TabsList>
           <TabsTrigger value="simulate">Analyse against my portfolio</TabsTrigger>
+          <TabsTrigger value="airesearch">AI Deep Analysis</TabsTrigger>
           <TabsTrigger value="alerts">Alerts ({alerts.data?.length ?? 0})</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="airesearch" className="mt-4">
+          <AiResearchPanel symbol={upper} />
+        </TabsContent>
 
         <TabsContent value="simulate" className="mt-4 space-y-4">
           <section className="panel space-y-4 p-4">
@@ -582,3 +663,4 @@ function StockDetail() {
     </div>
   );
 }
+

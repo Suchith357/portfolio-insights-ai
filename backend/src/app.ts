@@ -15,7 +15,9 @@ import { stocksRouter } from "./routes/stocks.routes.js";
 import { watchlistRouter } from "./routes/watchlist.routes.js";
 import { alertsRouter } from "./routes/alerts.routes.js";
 import { analysisRouter } from "./routes/analysis.routes.js";
+import { intelligenceRouter } from "./routes/intelligence.routes.js";
 import { adminRouter } from "./routes/admin.routes.js";
+import { aiRouter, adminAiRouter } from "./routes/ai.routes.js";
 
 export function createApp(): express.Express {
   const app = express();
@@ -58,7 +60,12 @@ export function createApp(): express.Express {
   app.use("/api/watchlist", watchlistRouter);
   app.use("/api/alerts", alertsRouter);
   app.use("/api/analysis", analysisRouter);
+  app.use("/api/intelligence", intelligenceRouter);
   app.use("/api/admin", adminRouter);
+  // AI foundation (additive): gracefully unavailable when the local runtime is
+  // absent — never a dependency of the core app.
+  app.use("/api/ai", aiRouter);
+  app.use("/api/admin/ai", adminAiRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

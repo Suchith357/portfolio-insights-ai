@@ -1,0 +1,68 @@
+version: "3.9"
+
+# PortfolioIQ — local full-stack compose. ₹0-cost: PostgreSQL + the two app
+# services run here; Ollama/Qwen stay on the host (free, local) and are
+# reached via AI_OLLAMA_BASE_URL=http://host.docker.internal:11434.
+#
+# The AI module degrades gracefully to UNAVAILABLE when Ollama is unreachable —
+# every other feature keeps working.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: portfolioiq
+      POSTGRES_USER: portfolioiq
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U portfolioiq -d portfolioiq"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "5432:5432" # optional host access for psql / pgAdmin
+
+  backend:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      DATABASE_URL: postgresql://portfolioiq:${POSTGRES_PASSWORD}@db:5432/portfolioiq
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:3000}
+      # Optional providers — leave unset to run Yahoo/GDELT only.
+      ALPHA_VANTAGE_API_KEY: ${ALPHA_VANTAGE_API_KEY:-}
+      MARKETAUX_API_KEY: ${MARKETAUX_API_KEY:-}
+      # Local AI (runs on the host, outside Docker).
+      AI_RUNTIME: OLLAMA
+      AI_OLLAMA_BASE_URL: ${AI_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # Linux hosts need this; harmless on Win/macOS
+    ports:
+      - "4000:4000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NITRO_PRESET: node-server
+    depends_on:
+      - backend
+    environment:
+      NITRO_PRESET: node-server
+      PORT: "3000"
+      # Server-side data fetches talk straight to the backend service.
+      API_BASE_URL: http://backend:4000/api
+      # Browser-side requests use the same origin, reverse-proxied below.
+      VITE_API_BASE_URL: /api
+    ports:
+      - "3000:3000"
+
+volumes:
+  pgdata:

@@ -23,7 +23,15 @@ export type AuditAction =
   | "ANALYSIS_SNAPSHOT"
   | "ADMIN_USER_UPDATE"
   | "ADMIN_STOCK_UPDATE"
-  | "MARKET_DATA_SYNC";
+  | "MARKET_DATA_SYNC"
+  | "INTELLIGENCE_FETCH"
+  | "INTELLIGENCE_CLEANUP"
+  | "INTELLIGENCE_EXPOSURE"
+  | "INTELLIGENCE_ALERT_GENERATED"
+  | "RISK_SNAPSHOT_WRITTEN"
+  | "SCENARIO_RUN"
+  | "BENCHMARK_SYNC"
+  | "AI_INDEX_REBUILD";
 
 /**
  * Best-effort audit trail. Never blocks or fails the originating request.

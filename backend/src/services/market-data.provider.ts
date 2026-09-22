@@ -50,6 +50,39 @@ export interface ProviderFundamentals {
   marketCapCr: number | null;
   peRatio: number | null;
   dividendYieldPct: number | null;
+  /**
+   * Req 2: last two fiscal years + growth stats (Yahoo annual income
+   * statement / cash-flow / growth modules), crore-normalised. null when the
+   * provider returned nothing usable — never fabricated.
+   */
+  financials: StockFinancials | null;
+}
+
+/** One fiscal year of annual statement data (₹ crore). */
+export interface FiscalYearFinancials {
+  fy: number | null;             // calendar year of period end
+  periodEnd: string | null;      // ISO date
+  revenueCr: number | null;
+  netIncomeCr: number | null;
+  ebitdaCr: number | null;
+  operatingCashflowCr: number | null;
+  freeCashflowCr: number | null;
+}
+
+/** Cached per-stock FY financials document (stored as stocks.financials JSONB). */
+export interface StockFinancials {
+  source: "YAHOO";
+  fetchedAt: string;
+  fiscalYears: FiscalYearFinancials[]; // newest first, up to 2
+  growth: {
+    earningsGrowthPct: number | null;
+    revenueGrowthPct: number | null;
+    profitMarginsPct: number | null;
+    returnOnEquityPct: number | null;
+    totalCashCr: number | null;
+    totalDebtCr: number | null;
+    ebitdaCr: number | null;
+  };
 }
 
 export class RateLimitError extends Error {
@@ -178,6 +211,12 @@ interface SummaryResponse {
         industry?: string;
         longBusinessSummary?: string;
       };
+      incomeStatementHistory?: {
+        incomeStatementHistory?: Array<Record<string, { raw?: number } | undefined>>;
+      };
+      cashflowStatementHistory?: {
+        cashflowStatements?: Array<Record<string, { raw?: number } | undefined>>;
+      };
       summaryDetail?: {
         marketCap?: { raw?: number };
         trailingPE?: { raw?: number };
@@ -245,7 +284,7 @@ export async function fetchFundamentals(
   const session = await getCrumbSession(timeoutMs);
   if (!session) return null;
 
-  const modules = "summaryDetail,defaultKeyStatistics,assetProfile,price";
+  const modules = "summaryDetail,defaultKeyStatistics,assetProfile,price,incomeStatementHistory,cashflowStatementHistory";
   const url = `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(
     yahooSymbol,
   )}?modules=${modules}&crumb=${encodeURIComponent(session.crumb)}`;
@@ -285,8 +324,74 @@ export async function fetchFundamentals(
             ? summary.forwardPE.raw
             : null,
       dividendYieldPct: divPct,
+      financials: extractFinancials(r),
     };
   } catch {
     return null;
   }
+}
+
+const CR_TO_RAW = 1e7; // Yahoo returns INR units; crore = units / 1e7
+
+function num(v: { raw?: number } | undefined): number | null {
+  const raw = v?.raw;
+  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+}
+
+/**
+ * Extracts the last two fiscal years (newest first) + growth stats from the
+ * quoteSummary result. Every field is nullable — absent provider data stays
+ * null (Requirement: never fabricate financial figures).
+ */
+type SummaryResult = {
+  assetProfile?: { sector?: string; industry?: string; longBusinessSummary?: string };
+  incomeStatementHistory?: { incomeStatementHistory?: Array<Record<string, { raw?: number } | undefined>> };
+  cashflowStatementHistory?: { cashflowStatements?: Array<Record<string, { raw?: number } | undefined>> };
+};
+
+function extractFinancials(r: SummaryResult): StockFinancials | null {
+  const income = r.incomeStatementHistory?.incomeStatementHistory ?? [];
+  const cashflow = r.cashflowStatementHistory?.cashflowStatements ?? [];
+  if (income.length === 0 && cashflow.length === 0) return null;
+
+  const fiscalYears: FiscalYearFinancials[] = income.slice(0, 2).map((row: Record<string, { raw?: number } | undefined>, i: number) => {
+    const endRaw = (row as { endDate?: { fmt?: string } }).endDate?.fmt ?? null;
+    const end = typeof endRaw === "string" && /^\d{4}-\d{2}-\d{2}$/.test(endRaw) ? endRaw : null;
+    const cf = cashflow[i] ?? {};
+    return {
+      fy: end === null ? null : Number(end.slice(0, 4)),
+      periodEnd: end,
+      revenueCr: num(row.totalRevenue) === null ? null : (num(row.totalRevenue) as number) / CR_TO_RAW,
+      netIncomeCr: num(row.netIncome) === null ? null : (num(row.netIncome) as number) / CR_TO_RAW,
+      ebitdaCr: num(row.ebitda) === null ? null : (num(row.ebitda) as number) / CR_TO_RAW,
+      operatingCashflowCr: num(cf.totalOperatingCashFlow as { raw?: number } | undefined) === null ? null : (num(cf.totalOperatingCashFlow as { raw?: number } | undefined) as number) / CR_TO_RAW,
+      freeCashflowCr: num(cf.freeCashflow as { raw?: number } | undefined) === null ? null : (num(cf.freeCashflow as { raw?: number } | undefined) as number) / CR_TO_RAW,
+    };
+  });
+
+  // Growth stats: prefer Yahoo's reported figures; derive YoY from the two
+  // stored annual rows when Yahoo's own growth field is absent.
+  const latest = fiscalYears[0];
+  const prior = fiscalYears[1];
+  const deriveYoY = (a: number | null, b: number | null): number | null =>
+    a !== null && b !== null && b !== 0 ? ((a - b) / Math.abs(b)) * 100 : null;
+  const profitMarginsPct =
+    latest && latest.revenueCr !== null && latest.revenueCr !== 0 && latest.netIncomeCr !== null
+      ? (latest.netIncomeCr / latest.revenueCr) * 100
+      : null;
+
+  return {
+    source: "YAHOO",
+    fetchedAt: new Date().toISOString(),
+    fiscalYears,
+    growth: {
+      earningsGrowthPct: deriveYoY(latest?.netIncomeCr ?? null, prior?.netIncomeCr ?? null),
+      revenueGrowthPct: deriveYoY(latest?.revenueCr ?? null, prior?.revenueCr ?? null),
+      profitMarginsPct,
+      returnOnEquityPct: null, // equity module not fetched — honest null
+      totalCashCr: null,
+      totalDebtCr: null,
+      ebitdaCr: latest?.ebitdaCr ?? null,
+    },
+  };
 }

@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import { Prisma } from "@prisma/client";
+import { ZodError } from "zod";
 import { HttpError } from "../utils/http.js";
 
 export function notFoundHandler(req: Request, res: Response): void {
@@ -15,6 +16,20 @@ export function errorHandler(
   res: Response,
   _next: NextFunction,
 ): void {
+  // Zod body/query validation failures are client errors, not server faults.
+  if (err instanceof ZodError) {
+    const first = err.issues[0];
+    const where = first ? first.path.join(".") : "body";
+    res.status(400).json({
+      error: {
+        code: "VALIDATION_ERROR",
+        message: first ? `${where}: ${first.message}` : "Invalid request payload.",
+        details: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+      },
+    });
+    return;
+  }
+
   if (err instanceof HttpError) {
     res.status(err.status).json({
       error: { code: err.code, message: err.message, details: err.details },

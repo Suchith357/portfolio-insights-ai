@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BellOff, CheckCheck, CheckCircle2, Search } from "lucide-react";
+import { BellOff, CheckCheck, CheckCircle2, Info, Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -245,6 +245,14 @@ function AlertsPage() {
                   <span className="text-muted-foreground">Why it matters:</span>
                   <span className="text-foreground">{a.whyItMatters}</span>
                 </div>
+                {a.meaning && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    <Info className="mr-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+                    <span>
+                      <span className="text-foreground">What this means:</span> {a.meaning.what} Higher → {a.meaning.higherMeans} Lower → {a.meaning.lowerMeans} Conclusion: {a.meaning.conclusion}
+                    </span>
+                  </div>
+                )}
                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">
                     {typeof pct === "number"

@@ -34,3 +34,15 @@ dist-ssr
 /src/generated/prisma
 
 .env
+
+# AI/RAG local artifacts — model indexes and metadata are derived data, never
+# committed. Model weights live in the Ollama store outside the repo.
+backend/data/ai/
+*.faiss
+*.faiss.tmp-*
+
+# Local AI test scratch
+backend/.tok_*
+backend/.pkg.json
+backend/phase3-tmp-test.mjs
+backend/phase45-tmp-test.mts

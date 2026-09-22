@@ -66,6 +66,19 @@ export const sellSimulation = asyncHandler(async (req, res) => {
   ok(res, result);
 });
 
+/**
+ * POST /api/analysis/:id/refresh — invoke the sp_refresh_portfolio_analysis
+ * stored procedure (in-database snapshot recomputation). Owner-scoped.
+ */
+export const refreshSnapshot = asyncHandler(async (req, res) => {
+  const result = await analysisService.refreshPortfolioAnalysisViaProcedure(
+    currentUser(req).userId,
+    Number(req.params["id"]),
+    currentUser(req).role === "ADMIN",
+  );
+  ok(res, result, 201);
+});
+
 /** GET /api/analysis/correlation/:symbol — candidate vs portfolio correlation. */
 export const correlation = asyncHandler(async (req, res) => {
   const value = await analysisService.correlationWithPortfolio(

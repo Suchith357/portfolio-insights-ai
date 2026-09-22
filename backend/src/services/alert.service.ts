@@ -11,6 +11,16 @@ export async function listAlerts(userId: number): Promise<AlertDto[]> {
   return rows.map((a) => toAlertDto(a, a.stocks?.symbol ?? null));
 }
 
+/** Alerts for one user scoped to a single stock (stock-detail tab). */
+export async function listAlertsForStock(userId: number, stockId: number): Promise<AlertDto[]> {
+  const rows = await prisma.alerts.findMany({
+    where: { user_id: userId, stock_id: stockId },
+    include: { stocks: { select: { symbol: true } } },
+    orderBy: { created_at: "desc" },
+  });
+  return rows.map((a) => toAlertDto(a, a.stocks?.symbol ?? null));
+}
+
 export async function markRead(userId: number, alertId: number): Promise<AlertDto> {
   const alert = await prisma.alerts.findUnique({
     where: { alert_id: alertId },

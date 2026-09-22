@@ -83,3 +83,114 @@ interface MarketDataSyncStarted {
   started: boolean;
   message: string;
 }
+
+// ============================================================================
+// Intelligence Engine — Phase 1 news foundation (ADMIN only endpoints)
+// ============================================================================
+
+export interface IntelligenceStatus {
+  provider: {
+    configured: string;
+    active: string;
+    degradedFrom: string | null;
+    available: boolean;
+    issues: string[];
+    all: Array<{ id: string; name: string; configured: boolean; keyless: boolean }>;
+  };
+  ingest: {
+    running: boolean;
+    lastFetchAt: string | null;
+    lastStatus: string | null;
+    lastMessage: string | null;
+    articlesStored24h: number;
+    duplicates24h: number;
+    eventsCreated24h: number;
+    entitiesMatched24h: number;
+  };
+  retention: {
+    rawNewsRetentionHours: number;
+    cleanupIntervalMinutes: number;
+    fetchIntervalMinutes: number;
+    nextCleanupAt: string | null;
+    nextFetchAt: string | null;
+  };
+  counts: {
+    articles: number;
+    entities: number;
+    events: number;
+    eventEntities: number;
+    expiredArticles: number;
+    expiredEvents: number;
+  };
+  lastCleanup: { ranAt: string; articlesDeleted: number; eventsDeleted: number } | null;
+}
+
+export interface IntelligenceNewsArticle {
+  id: number;
+  provider: string;
+  title: string;
+  description: string | null;
+  url: string;
+  sourceName: string | null;
+  language: string | null;
+  publishedAt: string;
+  fetchedAt: string;
+  expiresAt: string;
+  processingStatus: string;
+  matchedStocks: Array<{
+    symbol: string | null;
+    entityName: string;
+    sentimentLabel: string | null;
+    sentimentScore: number | null;
+    relevanceScore: number | null;
+  }>;
+}
+
+export interface IntelligenceEvent {
+  id: number;
+  category: string;
+  title: string;
+  summary: string | null;
+  detectedAt: string;
+  eventTime: string | null;
+  severity: number | null;
+  confidence: number | null;
+  relevance: number | null;
+  status: string;
+  expiresAt: string | null;
+  entities: Array<{
+    stockId: number | null;
+    entityName: string;
+    relationshipType: string;
+    direction: string | null;
+    relevance: number | null;
+  }>;
+}
+
+export async function getIntelligenceStatus(): Promise<IntelligenceStatus> {
+  return apiRequest<IntelligenceStatus>("/admin/intelligence/news/status");
+}
+
+export async function getIntelligenceRecentNews(limit = 20): Promise<IntelligenceNewsArticle[]> {
+  return apiRequest<IntelligenceNewsArticle[]>(`/admin/intelligence/news/recent?limit=${limit}`);
+}
+
+export async function getIntelligenceRecentEvents(limit = 20): Promise<IntelligenceEvent[]> {
+  return apiRequest<IntelligenceEvent[]>(`/admin/intelligence/events/recent?limit=${limit}`);
+}
+
+/** Manual news fetch (ADMIN only); 202 acceptance — poll status for results. */
+export async function triggerIntelligenceFetch(companyScans = 0): Promise<{ started: boolean; message: string }> {
+  return apiRequest(`/admin/intelligence/news/fetch?companyScans=${companyScans}`, { method: "POST" });
+}
+
+export async function triggerIntelligenceCleanup(): Promise<{
+  ranAt: string;
+  articlesDeleted: number;
+  entitiesDeleted: number;
+  eventsDeleted: number;
+  eventEntitiesDeleted: number;
+  errors: string[];
+}> {
+  return apiRequest("/admin/intelligence/news/cleanup", { method: "POST" });
+}

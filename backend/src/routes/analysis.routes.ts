@@ -25,5 +25,8 @@ analysisRouter.get("/overview", analysis.overview);
 analysisRouter.get("/market-freshness", analysis.marketFreshness);
 analysisRouter.get("/stock/:symbol", validate(symbolParam, "params"), analysis.stockRisk);
 analysisRouter.get("/correlation/:symbol", validate(symbolParam, "params"), analysis.correlation);
+const idParam = z.object({ id: z.coerce.number().int().positive() });
+
 analysisRouter.post("/buy-simulation", validate(buySchema), analysis.buySimulation);
+analysisRouter.post("/:id/refresh", validate(idParam, "params"), analysis.refreshSnapshot);
 analysisRouter.post("/sell-simulation", validate(sellSchema), analysis.sellSimulation);

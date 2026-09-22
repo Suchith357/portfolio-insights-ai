@@ -16,7 +16,9 @@ import { Route as RegisterRouteImport } from './routes/register'
 import { Route as AppAdminRouteImport } from './routes/_app.admin'
 import { Route as AppAlertsRouteImport } from './routes/_app.alerts'
 import { Route as AppDashboardRouteImport } from './routes/_app.dashboard'
+import { Route as AppIntelligenceRouteImport } from './routes/_app.intelligence'
 import { Route as AppProfileRouteImport } from './routes/_app.profile'
+import { Route as AppRiskRouteImport } from './routes/_app.risk'
 import { Route as AppWatchlistRouteImport } from './routes/_app.watchlist'
 import { Route as AppHoldingsIdRouteImport } from './routes/_app.holdings.$id'
 import { Route as AppPortfoliosIndexRouteImport } from './routes/_app.portfolios.index'
@@ -58,9 +60,19 @@ const AppDashboardRoute = AppDashboardRouteImport.update({
   path: '/dashboard',
   getParentRoute: () => AppRoute,
 } as any)
+const AppIntelligenceRoute = AppIntelligenceRouteImport.update({
+  id: '/intelligence',
+  path: '/intelligence',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppProfileRoute = AppProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppRiskRoute = AppRiskRouteImport.update({
+  id: '/risk',
+  path: '/risk',
   getParentRoute: () => AppRoute,
 } as any)
 const AppWatchlistRoute = AppWatchlistRouteImport.update({
@@ -101,7 +113,9 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AppAdminRoute
   '/alerts': typeof AppAlertsRoute
   '/dashboard': typeof AppDashboardRoute
+  '/intelligence': typeof AppIntelligenceRoute
   '/profile': typeof AppProfileRoute
+  '/risk': typeof AppRiskRoute
   '/watchlist': typeof AppWatchlistRoute
   '/holdings/$id': typeof AppHoldingsIdRoute
   '/portfolios/$id': typeof AppPortfoliosIdRoute
@@ -116,7 +130,9 @@ export interface FileRoutesByTo {
   '/admin': typeof AppAdminRoute
   '/alerts': typeof AppAlertsRoute
   '/dashboard': typeof AppDashboardRoute
+  '/intelligence': typeof AppIntelligenceRoute
   '/profile': typeof AppProfileRoute
+  '/risk': typeof AppRiskRoute
   '/watchlist': typeof AppWatchlistRoute
   '/holdings/$id': typeof AppHoldingsIdRoute
   '/portfolios/$id': typeof AppPortfoliosIdRoute
@@ -133,7 +149,9 @@ export interface FileRoutesById {
   '/_app/admin': typeof AppAdminRoute
   '/_app/alerts': typeof AppAlertsRoute
   '/_app/dashboard': typeof AppDashboardRoute
+  '/_app/intelligence': typeof AppIntelligenceRoute
   '/_app/profile': typeof AppProfileRoute
+  '/_app/risk': typeof AppRiskRoute
   '/_app/watchlist': typeof AppWatchlistRoute
   '/_app/holdings/$id': typeof AppHoldingsIdRoute
   '/_app/portfolios/$id': typeof AppPortfoliosIdRoute
@@ -150,7 +168,9 @@ export interface FileRouteTypes {
     | '/admin'
     | '/alerts'
     | '/dashboard'
+    | '/intelligence'
     | '/profile'
+    | '/risk'
     | '/watchlist'
     | '/holdings/$id'
     | '/portfolios/$id'
@@ -165,7 +185,9 @@ export interface FileRouteTypes {
     | '/admin'
     | '/alerts'
     | '/dashboard'
+    | '/intelligence'
     | '/profile'
+    | '/risk'
     | '/watchlist'
     | '/holdings/$id'
     | '/portfolios/$id'
@@ -181,7 +203,9 @@ export interface FileRouteTypes {
     | '/_app/admin'
     | '/_app/alerts'
     | '/_app/dashboard'
+    | '/_app/intelligence'
     | '/_app/profile'
+    | '/_app/risk'
     | '/_app/watchlist'
     | '/_app/holdings/$id'
     | '/_app/portfolios/$id'
@@ -248,11 +272,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/intelligence': {
+      id: '/_app/intelligence'
+      path: '/intelligence'
+      fullPath: '/intelligence'
+      preLoaderRoute: typeof AppIntelligenceRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/profile': {
       id: '/_app/profile'
       path: '/profile'
       fullPath: '/profile'
       preLoaderRoute: typeof AppProfileRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/risk': {
+      id: '/_app/risk'
+      path: '/risk'
+      fullPath: '/risk'
+      preLoaderRoute: typeof AppRiskRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/watchlist': {
@@ -304,7 +342,9 @@ interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
   AppAlertsRoute: typeof AppAlertsRoute
   AppDashboardRoute: typeof AppDashboardRoute
+  AppIntelligenceRoute: typeof AppIntelligenceRoute
   AppProfileRoute: typeof AppProfileRoute
+  AppRiskRoute: typeof AppRiskRoute
   AppWatchlistRoute: typeof AppWatchlistRoute
   AppHoldingsIdRoute: typeof AppHoldingsIdRoute
   AppPortfoliosIdRoute: typeof AppPortfoliosIdRoute
@@ -317,7 +357,9 @@ const AppRouteChildren: AppRouteChildren = {
   AppAdminRoute: AppAdminRoute,
   AppAlertsRoute: AppAlertsRoute,
   AppDashboardRoute: AppDashboardRoute,
+  AppIntelligenceRoute: AppIntelligenceRoute,
   AppProfileRoute: AppProfileRoute,
+  AppRiskRoute: AppRiskRoute,
   AppWatchlistRoute: AppWatchlistRoute,
   AppHoldingsIdRoute: AppHoldingsIdRoute,
   AppPortfoliosIdRoute: AppPortfoliosIdRoute,

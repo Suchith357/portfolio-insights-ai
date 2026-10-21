@@ -22,6 +22,7 @@ import {
   fetchJsonWithRetry,
   parseDateSafe,
   sanitizeText,
+  ProviderUnavailableError,
   type FetchOptions,
   type NewsProvider,
   type NormalizedArticle,
@@ -50,6 +51,27 @@ interface GdeltArticle {
 const MIN_REQUEST_INTERVAL_MS = env.newsInterQueryDelayMs; // >= 5s, env-tunable
 let gateTail: Promise<void> = Promise.resolve(); // FIFO chain
 let lastRequestStartedAt = 0; // 0 = never issued
+// GDELT rate-limits per IP (Render's egress IP is shared among tenants), so
+// even a perfectly spaced request stream can draw 429s. After one, back off
+// process-wide with escalating cool-downs (30s → 60s → 120s, capped) so the
+// next queries — including concurrent/overlapping ones — wait instead of
+// hammering the provider.
+const COOLDOWN_BASE_MS = 30_000;
+const COOLDOWN_CAP_MS = 120_000;
+let cooldownUntil = 0; // epoch ms; 0 = no active cool-down
+let consecutive429s = 0;
+
+/** Record a 429: escalate the process-wide cool-down window. */
+function penalize429(): void {
+  consecutive429s += 1;
+  cooldownUntil = Date.now() + Math.min(COOLDOWN_BASE_MS * 2 ** (consecutive429s - 1), COOLDOWN_CAP_MS);
+  console.log(`[gdelt] 429 cooling: next request deferred ~${Math.round((cooldownUntil - Date.now()) / 1000)}s (strike ${consecutive429s})`);
+}
+
+/** Record a success: clear the 429 strike count. */
+function clear429(): void {
+  consecutive429s = 0;
+}
 
 async function runGated<T>(label: string, run: () => Promise<T>): Promise<T> {
   const prevTail = gateTail;
@@ -59,10 +81,14 @@ async function runGated<T>(label: string, run: () => Promise<T>): Promise<T> {
   });
   await prevTail.catch(() => undefined); // wait for our turn
   try {
-    // Enforce minimum spacing between request STARTS (provider contract).
-    const waitMs = lastRequestStartedAt + MIN_REQUEST_INTERVAL_MS - Date.now();
+    // Enforce minimum spacing between request STARTS (provider contract) and
+    // any active 429 cool-down (shared-IP contention defense).
+    const waitMs = Math.max(
+      lastRequestStartedAt + MIN_REQUEST_INTERVAL_MS - Date.now(),
+      cooldownUntil - Date.now(),
+    );
     if (waitMs > 0) {
-      console.log(`[gdelt] gate: waiting ${waitMs}ms before ${label} (>=5s provider window)`);
+      console.log(`[gdelt] gate: waiting ${waitMs}ms before ${label} (spacing/cool-down)`);
       await new Promise((r) => setTimeout(r, waitMs));
     }
     lastRequestStartedAt = Date.now();
@@ -148,16 +174,29 @@ export class GdeltProvider implements NewsProvider {
         timespan,
       }).toString();
 
-    const payload = (await runGated("gdelt query", () =>
-      fetchJsonWithRetry(
-        url,
-        { method: "GET", headers: { "User-Agent": "PortfolioIQ/1.0 (+local academic project)" } },
-        // GDELT DOC is documented slow on complex queries — give it 30s.
-        // Retries are env-driven (default 1) with >=6s backoff in
-        // fetchJsonWithRetry; the gate above guarantees >=5s between starts.
-        { timeoutMs: Math.max(30_000, env.newsProviderTimeoutMs), retries: env.newsProviderRetries, providerId: this.id },
-      ),
-    )) as { articles?: GdeltArticle[] } | null;
+    // On an explicit HTTP 429 — even after the internal retry — open an
+    // escalating process-wide cool-down (penalize429) so later queries in the
+    // same ingest cycle respect it. Successes reset the strike count.
+    let payload: { articles?: GdeltArticle[] } | null;
+    try {
+      payload = (await runGated("gdelt query", () =>
+          fetchJsonWithRetry(
+            url,
+            { method: "GET", headers: { "User-Agent": "PortfolioIQ/1.0 (+local academic project)" } },
+            // GDELT DOC is documented slow on complex queries — give it 30s.
+            // Retries are env-driven (default 1) with >=6s backoff in
+            // fetchJsonWithRetry (>=15s after an explicit 429); the gate above
+            // guarantees >=5s spacing and observes the 429 cool-down.
+            { timeoutMs: Math.max(30_000, env.newsProviderTimeoutMs), retries: env.newsProviderRetries, providerId: this.id },
+          ),
+        )) as { articles?: GdeltArticle[] } | null;
+      clear429();
+    } catch (error) {
+      if (error instanceof ProviderUnavailableError && error.message.includes("HTTP 429")) {
+        penalize429();
+      }
+      throw error;
+    }
 
     const articles = Array.isArray(payload?.articles) ? payload!.articles! : [];
     const normalized: NormalizedArticle[] = [];

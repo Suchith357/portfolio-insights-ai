@@ -136,9 +136,10 @@ export async function fetchJsonWithRetry(
       // Backoff: plain network errors wait 6s (>= GDELT's 5s window), but an
       // explicit HTTP 429 means the provider is telling us to back OFF —
       // retrying after 6s reads as spam. Rate-limit retries therefore wait
-      // 15s minimum before the single retry.
+      // 30s minimum before the next attempt (shared egress IPs need the
+      // extra room; the GDELT gate adds a cool-down on top).
       const rateLimited = error instanceof ProviderUnavailableError && error.message.includes("HTTP 429");
-      await new Promise((r) => setTimeout(r, (rateLimited ? 15_000 : 6_000) * (attempt + 1)));
+      await new Promise((r) => setTimeout(r, (rateLimited ? 30_000 : 6_000) * (attempt + 1)));
     } finally {
       clearTimeout(timer);
     }

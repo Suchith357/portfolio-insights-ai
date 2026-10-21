@@ -42,6 +42,8 @@ const EXCHANGE = "NSE";
 interface StockSeed {
   symbol: string;
   name: string;
+  /** Yahoo symbol when it differs from `${symbol}.NS` (delisted/renamed tickers). */
+  yahooSymbol?: string;
   sector: string;
   industry: string;
   marketCap: number;
@@ -64,7 +66,10 @@ const STOCK_SEEDS: StockSeed[] = [
   { symbol: "HINDUNILVR", name: "Hindustan Unilever", sector: "FMCG", industry: "Consumer Goods", marketCap: 570000, peRatio: 54.1, dividendYield: 1.8, basePrice: 238, vol: 0.16, drift: 0.02, description: "India's largest fast-moving consumer goods company." },
   { symbol: "SUNPHARMA", name: "Sun Pharmaceutical", sector: "Pharma", industry: "Pharmaceuticals", marketCap: 410000, peRatio: 36.2, dividendYield: 0.8, basePrice: 142, vol: 0.24, drift: 0.15, description: "India's largest pharmaceutical company by market value." },
   { symbol: "DRREDDY", name: "Dr. Reddy's Laboratories", sector: "Pharma", industry: "Pharmaceuticals", marketCap: 105000, peRatio: 21.5, dividendYield: 0.9, basePrice: 128, vol: 0.25, drift: 0.07, description: "Global pharmaceutical company headquartered in Hyderabad." },
-  { symbol: "TATAMOTORS", name: "Tata Motors", sector: "Auto", industry: "Automobiles", marketCap: 350000, peRatio: 12.3, dividendYield: 0.6, basePrice: 72, vol: 0.36, drift: 0.16, description: "Indian automotive manufacturer with global commercial vehicle operations." },
+  // NOTE: the legacy TATAMOTORS.NS ticker was delisted after the Tata Motors
+  // demerger; Yahoo serves the renamed listed entity as TMCV.NS ("Tata Motors
+  // Limited"), so the mapping is explicit instead of assuming `${symbol}.NS`.
+  { symbol: "TATAMOTORS", yahooSymbol: "TMCV.NS", name: "Tata Motors", sector: "Auto", industry: "Automobiles", marketCap: 350000, peRatio: 12.3, dividendYield: 0.6, basePrice: 72, vol: 0.36, drift: 0.16, description: "Indian automotive manufacturer with global commercial vehicle operations." },
   { symbol: "M&M", name: "Mahindra & Mahindra", sector: "Auto", industry: "Automobiles", marketCap: 355000, peRatio: 24.8, dividendYield: 0.7, basePrice: 68, vol: 0.29, drift: 0.18, description: "Utility vehicles, tractors and diversified engineering group." },
   { symbol: "TATASTEEL", name: "Tata Steel", sector: "Metals", industry: "Steel", marketCap: 185000, peRatio: 17.9, dividendYield: 2.4, basePrice: 152, vol: 0.34, drift: 0.05, description: "Global steel producer with major Indian and European operations." },
   { symbol: "JSWSTEEL", name: "JSW Steel", sector: "Metals", industry: "Steel", marketCap: 220000, peRatio: 42.3, dividendYield: 0.5, basePrice: 92, vol: 0.31, drift: 0.07, description: "One of India's leading integrated steel manufacturers." },
@@ -180,6 +185,7 @@ async function seedStocksAndPrices() {
       update: {},
       create: {
         symbol: seed.symbol,
+        yahoo_symbol: seed.yahooSymbol ?? null,
         company_name: seed.name,
         sector: seed.sector,
         industry: seed.industry,

@@ -184,33 +184,78 @@ async function syncStock(
       out.bars = history.bars.length;
     }
 
-    // Latest quote → keep the freshest close as an upsert for today too.
+    // Latest quote → keep the freshest close as an upsert for "today".
+    //
+    // The quote must only merge into the last bar when that bar IS today's
+    // trading day. Yahoo's most recent session bar can arrive with close:null
+    // (closed session), making the last COMPLETE bar belong to a previous day:
+    // writing today's quote price onto that earlier date would violate the
+    // stock_prices_range_check (close outside that bar's low/high band) and,
+    // worse, silently rewrite a historical close whenever it happens to fall
+    // inside the band. On a different day the quote gets its own row keyed on
+    // the server's UTC trading date; the next history sync replaces it with
+    // the provider's real OHLC once the session bar is published.
     if (quote && quote.price !== null && quote.price > 0) {
-      const today = new Date();
-      today.setUTCHours(0, 0, 0, 0);
+      const now = new Date();
+      const todayKey = now.toISOString().slice(0, 10);
       const lastBar = history.bars[history.bars.length - 1];
-      const quoteDate = lastBar
-        ? new Date(`${lastBar.date}T00:00:00Z`)
-        : today;
-      await prisma.stock_prices.upsert({
-        where: { stock_id_price_date: { stock_id: stock.stock_id, price_date: quoteDate } },
-        create: {
-          stock_id: stock.stock_id,
-          price_date: quoteDate,
-          open_price: lastBar?.open ?? quote.price,
-          high_price: lastBar?.high ?? quote.price,
-          low_price: lastBar?.low ?? quote.price,
-          close_price: quote.price,
-          volume: lastBar?.volume ?? null,
-          data_source: storedViaProvider,
-        },
-        update: {
-          close_price: quote.price,
-          high_price: lastBar ? Math.max(lastBar.high, quote.price) : quote.price,
-          low_price: lastBar ? Math.min(lastBar.low, quote.price) : quote.price,
-          data_source: storedViaProvider,
-        },
-      });
+      const sameDayAsLastBar = lastBar !== undefined && lastBar.date === todayKey;
+      const quoteDateStr = sameDayAsLastBar ? lastBar!.date : todayKey;
+      const quoteDate = new Date(`${quoteDateStr}T00:00:00Z`);
+
+      if (sameDayAsLastBar) {
+        // Same trading day: expand the live bar with the freshest close.
+        await prisma.stock_prices.upsert({
+          where: { stock_id_price_date: { stock_id: stock.stock_id, price_date: quoteDate } },
+          create: {
+            stock_id: stock.stock_id,
+            price_date: quoteDate,
+            open_price: lastBar!.open,
+            high_price: lastBar!.high,
+            low_price: lastBar!.low,
+            close_price: quote.price,
+            volume: lastBar!.volume,
+            data_source: storedViaProvider,
+          },
+          update: {
+            close_price: quote.price,
+            high_price: Math.max(lastBar!.high, quote.price),
+            low_price: Math.min(lastBar!.low, quote.price),
+            data_source: storedViaProvider,
+          },
+        });
+      } else {
+        // Different day (or no bars): store the quote on its own date with
+        // self-consistent OHLC. If a row already exists for that date (e.g. a
+        // pre-market quote where UTC has already rolled over), expand its
+        // band in memory so the write stays within the range check.
+        const existing = await prisma.stock_prices.findUnique({
+          where: { stock_id_price_date: { stock_id: stock.stock_id, price_date: quoteDate } },
+          select: { open_price: true, high_price: true, low_price: true },
+        });
+        const open = existing ? Number(existing.open_price) : quote.price;
+        const high = Math.max(existing ? Number(existing.high_price) : quote.price, quote.price);
+        const low = Math.min(existing ? Number(existing.low_price) : quote.price, quote.price);
+        await prisma.stock_prices.upsert({
+          where: { stock_id_price_date: { stock_id: stock.stock_id, price_date: quoteDate } },
+          create: {
+            stock_id: stock.stock_id,
+            price_date: quoteDate,
+            open_price: open,
+            high_price: high,
+            low_price: low,
+            close_price: quote.price,
+            volume: null,
+            data_source: storedViaProvider,
+          },
+          update: {
+            close_price: quote.price,
+            high_price: high,
+            low_price: low,
+            data_source: storedViaProvider,
+          },
+        });
+      }
       out.bars += 1;
     }
   } catch (error) {

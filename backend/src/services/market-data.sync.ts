@@ -263,19 +263,22 @@ export async function runSync(trigger: "SCHEDULED" | "MANUAL" | "STARTUP", mode:
   if (running) throw new Error("A market-data sync is already running.");
   running = true;
 
-  const sync = await prisma.market_data_syncs.create({
-    data: { trigger_type: trigger, mode, status: "RUNNING" },
-  });
-
-  const startedAt = new Date();
+  // The lock must be released even when the bookkeeping row cannot be created
+  // (e.g. the table is briefly unreachable). Otherwise a single early failure
+  // wedges the process: every future tick reports "already running" forever.
+  let sync: { sync_id: number } | undefined;
   let stocksProcessed = 0;
   let pricesUpserted = 0;
   let fundamentalsUpdated = 0;
   let failures = 0;
   let skippedRateLimited = 0;
   const failureDetails: string[] = [];
-
   try {
+    sync = await prisma.market_data_syncs.create({
+      data: { trigger_type: trigger, mode, status: "RUNNING" },
+    });
+
+    const startedAt = new Date();
     const stocks = await prisma.stocks.findMany({
       where: { is_active: true },
       select: { stock_id: true, symbol: true, yahoo_symbol: true, company_name: true, sector: true },
@@ -303,7 +306,6 @@ export async function runSync(trigger: "SCHEDULED" | "MANUAL" | "STARTUP", mode:
 
     const status: SyncSummary["status"] =
       failures === 0 ? "SUCCESS" : failures < stocksProcessed ? "PARTIAL" : "FAILED";
-
     // Phase 7: NIFTY benchmark rides the SAME cadence as the stock sync. Its
     // failure is fully isolated — a benchmark outage must never fail the stock
     // sync or alter the SyncSummary status. Zero cost: same free Yahoo source.
@@ -340,16 +342,22 @@ export async function runSync(trigger: "SCHEDULED" | "MANUAL" | "STARTUP", mode:
       finishedAt: new Date().toISOString(),
     };
   } catch (error) {
-    const fatalMessage = error instanceof Error ? error.message : String(error);
-    await prisma.market_data_syncs.update({
-      where: { sync_id: sync.sync_id },
-      data: { status: "FAILED", finished_at: new Date(), error_message: fatalMessage.slice(0, 500) },
-    });
+    // The bookkeeping row may not exist (create failed); keep the reported
+    // message simple rather than crashing on the update.
+    try {
+      const fatalMessage = error instanceof Error ? error.message : String(error);
+      await prisma.market_data_syncs.update({
+        where: { sync_id: sync!.sync_id },
+        data: { status: "FAILED", finished_at: new Date(), error_message: fatalMessage.slice(0, 500) },
+      });
+    } catch {
+      /* no sync record to update — surface the original error below */
+    }
     throw error;
   } finally {
     running = false;
     // Audit trail for manual runs; scheduled runs are audited via the table.
-    if (trigger === "MANUAL") {
+    if (trigger === "MANUAL" && sync) {
       await recordAudit({
         action: "ADMIN_STOCK_UPDATE",
         entityType: "MARKET_DATA",

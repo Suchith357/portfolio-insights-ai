@@ -5,7 +5,11 @@ import "dotenv/config";
 import { defineConfig, env } from "prisma/config";
 
 export default defineConfig({
-  schema: "prisma/schema.prisma",
+  // The real schema lives with the backend package (prisma config must be able
+  // to resolve it from the repo root). The historical root-level
+  // prisma/schema.prisma is a stale introspection that lacks the intelligence
+  // and market-data models, so it must never be used to generate the client.
+  schema: "backend/prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
   },

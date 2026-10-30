@@ -30,6 +30,25 @@ let inFlight: Promise<IndexResult> | null = null;
 
 const DEFAULT_LIMITS = { news: 400, events: 150, snapshots: 120 };
 
+/**
+ * Embedding batch size. 64 keeps request COUNT low (a 670-doc rebuild = 11
+ * batch requests) so a cold hosted (ephemeral-disk) rebuild fits inside the
+ * free-tier per-minute cap of the default OpenRouter runtime.
+ */
+const BATCH = 64;
+
+/**
+ * Spacing between embedding batches for the hosted runtime. The default free
+ * cap is 20 requests/min → 60s/20 = 3s minimum; 3500ms leaves head-room when
+ * the retrieval queries fire right after a rebuild. Local OLLAMA is untouched
+ * (no external cap). Overridable via OPENROUTER_EMBED_SPACING_MS.
+ */
+function batchSpacingMs(): number {
+  if (aiConfig.runtime !== "OPENROUTER") return 0;
+  const raw = Number(process.env["OPENROUTER_EMBED_SPACING_MS"]);
+  return Number.isFinite(raw) && raw >= 0 ? Math.min(30_000, raw) : 3_500;
+}
+
 export async function rebuildIndex(limits = DEFAULT_LIMITS): Promise<IndexResult> {
   if (inFlight) return inFlight;
   inFlight = doRebuild(limits).finally(() => {
@@ -53,10 +72,11 @@ async function doRebuild(limits: typeof DEFAULT_LIMITS): Promise<IndexResult> {
       return { ok: true, documentsIndexed: 0, documentsConsidered: 0, skipped: 0, durationMs: Date.now() - started };
     }
 
-    // Batch to keep memory modest on 16 GB RAM.
+    // Embed in batches; spacing honours hosted free-tier per-minute caps.
     const vectors: number[][] = [];
-    const BATCH = 32;
+    const spacing = batchSpacingMs();
     for (let i = 0; i < documents.length; i += BATCH) {
+      if (i > 0 && spacing > 0) await new Promise((r) => setTimeout(r, spacing));
       const batch = documents.slice(i, i + BATCH).map((d) => `${d.title}\n${d.content}`);
       const batchVecs = await embedMany(batch);
       vectors.push(...batchVecs);
@@ -161,8 +181,9 @@ async function doAppend(documents: KnowledgeDocument[]): Promise<AppendResult> {
     if (fresh.length === 0) return { ok: true, appended: 0, skippedExisting };
 
     const vectors: number[][] = [];
-    const BATCH = 32;
+    const spacing = batchSpacingMs();
     for (let i = 0; i < fresh.length; i += BATCH) {
+      if (i > 0 && spacing > 0) await new Promise((r) => setTimeout(r, spacing));
       const batch = fresh.slice(i, i + BATCH).map((d) => `${d.title}\n${d.content}`);
       vectors.push(...(await embedMany(batch)));
     }

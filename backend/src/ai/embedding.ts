@@ -141,40 +141,63 @@ async function ollamaEmbed(trimmed: string[]): Promise<number[][]> {
 async function openrouterEmbed(trimmed: string[]): Promise<number[][]> {
   const apiKey = aiConfig.openrouterApiKey;
   if (!apiKey) throw new EmbeddingError("The hosted embedding provider is not configured on the server (OPENROUTER_API_KEY is missing).", "UNAVAILABLE");
-  let res: Response;
-  try {
-    res = await fetch(`${aiConfig.openrouterBaseUrl}/embeddings`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://portfolio-insights-ai-zeta.vercel.app",
-        "X-Title": "PortfolioIQ",
-      },
-      body: JSON.stringify({ model: aiConfig.openrouterEmbeddingModel, input: trimmed }),
-      signal: AbortSignal.timeout(aiConfig.llmTimeoutMs),
-    });
-  } catch (err) {
-    throw new EmbeddingError(`Hosted embedding provider unreachable: ${(err as Error).message}`);
+
+  // Free-tier caps: a back-to-back batch loop crosses the per-minute limit.
+  // A bounded retry that honours the provider's Retry-After keeps a ~1-minute
+  // window recoverable without any unbounded loop that could burn the daily
+  // request budget (failed attempts also count against it).
+  const MAX_ATTEMPTS = 3;
+  let lastError: EmbeddingError = new EmbeddingError("OpenRouter embedding request failed.", "SERVER");
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(`${aiConfig.openrouterBaseUrl}/embeddings`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://portfolio-insights-ai-zeta.vercel.app",
+          "X-Title": "PortfolioIQ",
+        },
+        body: JSON.stringify({ model: aiConfig.openrouterEmbeddingModel, input: trimmed }),
+        signal: AbortSignal.timeout(aiConfig.llmTimeoutMs),
+      });
+    } catch (err) {
+      throw new EmbeddingError(`Hosted embedding provider unreachable: ${(err as Error).message}`);
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      if (res.status === 401 || res.status === 403) {
+        throw new EmbeddingError("OpenRouter rejected the server's API credentials (HTTP 4xx auth).", "AUTH");
+      }
+      if (res.status === 429 || res.status === 402) {
+        lastError = new EmbeddingError(`OpenRouter free-tier embedding quota or rate limit is exhausted (HTTP ${res.status}) — try again later.`, "RATE_LIMIT");
+        const retryAfter = Number(res.headers.get("Retry-After"));
+        const waitMs = Math.min(30_000, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 12_000);
+        if (attempt < MAX_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+        throw lastError;
+      }
+      if (res.status === 404) {
+        throw new EmbeddingError(`OpenRouter cannot serve embedding model ${aiConfig.openrouterEmbeddingModel} (HTTP 404 — set OPENROUTER_EMBEDDING_MODEL to an available model).`, "UNAVAILABLE");
+      }
+      throw new EmbeddingError(`Embedding request failed (HTTP ${res.status}): ${body.slice(0, 160)}`, "SERVER");
+    }
+    const parsed = (await res.json()) as { data?: Array<{ embedding?: number[]; index?: number }>; error?: unknown };
+    const data = parsed.data;
+    if (parsed.error || !Array.isArray(data) || data.length !== trimmed.length || data.some((d) => !Array.isArray(d.embedding))) {
+      throw new EmbeddingError("OpenRouter returned an unexpected embedding payload shape.", "SHAPE");
+    }
+    // The embeddings endpoint preserves input order (OpenAI-compatible); direct
+    // mapping would be fine here, but index-sorting makes the contract explicit.
+    const ordered = [...data].sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).map((d) => d.embedding as number[]);
+    const firstLen = ordered[0]?.length ?? 0;
+    if (firstLen > 0) aiConfig.noteEmbeddingDiscovered(firstLen);
+    return ordered;
   }
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    if (res.status === 401 || res.status === 403) throw new EmbeddingError("OpenRouter rejected the server's API credentials (HTTP 4xx auth).", "AUTH");
-    if (res.status === 429 || res.status === 402) throw new EmbeddingError(`OpenRouter free-tier embedding quota is exhausted (HTTP ${res.status}) — try again later.`, "RATE_LIMIT");
-    if (res.status === 404) throw new EmbeddingError(`OpenRouter cannot serve embedding model ${aiConfig.openrouterEmbeddingModel} (HTTP 404 — set OPENROUTER_EMBEDDING_MODEL to an available model).`, "UNAVAILABLE");
-    throw new EmbeddingError(`Embedding request failed (HTTP ${res.status}): ${body.slice(0, 160)}`, "SERVER");
-  }
-  const parsed = (await res.json()) as { data?: Array<{ embedding?: number[]; index?: number }>; error?: unknown };
-  const data = parsed.data;
-  if (parsed.error || !Array.isArray(data) || data.length !== trimmed.length || data.some((d) => !Array.isArray(d.embedding))) {
-    throw new EmbeddingError("OpenRouter returned an unexpected embedding payload shape.", "SHAPE");
-  }
-  // The embeddings endpoint preserves input order (OpenAI-compatible); direct
-  // mapping would be fine here, but index-sorting makes the contract explicit.
-  const ordered = [...data].sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).map((d) => d.embedding as number[]);
-  const firstLen = ordered[0]?.length ?? 0;
-  if (firstLen > 0) aiConfig.noteEmbeddingDiscovered(firstLen);
-  return ordered;
+  throw lastError;
 }
 
 function normalise(vec: number[]): number[] {

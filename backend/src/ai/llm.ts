@@ -53,7 +53,9 @@ export interface ChatOptions {
 /** A single 429/5xx/transport retry is bounded so requests can never loop. */
 const MAX_ATTEMPTS = 2;
 const RETRY_BACKOFF_MS = 2_000;
-const RETRY_AFTER_CAP_MS = 8_000;
+// Free-tier per-minute windows can carry a Retry-After of ~20s; honouring it
+// beats failing. Still bounded so chat calls can never stall for minutes.
+const RETRY_AFTER_CAP_MS = 20_000;
 
 function openrouterHeaders(apiKey: string): Record<string, string> {
   return {

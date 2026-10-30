@@ -33,12 +33,19 @@ export type LlmErrorKind =
 export class LlmError extends Error {
   readonly kind: LlmErrorKind;
   readonly retryAfterMs: number | null;
+  readonly isDailyQuotaExhausted: boolean;
 
-  constructor(message: string, kind: LlmErrorKind = "SERVER", retryAfterMs: number | null = null) {
+  constructor(
+    message: string,
+    kind: LlmErrorKind = "SERVER",
+    retryAfterMs: number | null = null,
+    isDailyQuotaExhausted = false,
+  ) {
     super(message);
     this.name = "LlmError";
     this.kind = kind;
     this.retryAfterMs = retryAfterMs;
+    this.isDailyQuotaExhausted = isDailyQuotaExhausted;
   }
 }
 
@@ -50,7 +57,7 @@ export interface ChatOptions {
   timeoutMs?: number;
 }
 
-/** A single 429/5xx/transport retry is bounded so requests can never loop. */
+/** A single retry is bounded so requests can never loop. */
 const MAX_ATTEMPTS = 2;
 const RETRY_BACKOFF_MS = 2_000;
 // Free-tier per-minute windows can carry a Retry-After of ~20s; honouring it
@@ -68,26 +75,65 @@ function openrouterHeaders(apiKey: string): Record<string, string> {
 }
 
 /** Parse OpenRouter's error envelope into a typed, user-safe message. */
-function classifyOpenRouterStatus(status: number, bodyText: string): LlmError {
+function classifyOpenRouterStatus(status: number, bodyText: string, headers?: Headers): LlmError {
   let detail = "";
+  let errorMessage = "";
+  let errorCode: number | undefined;
+
   try {
-    const body = JSON.parse(bodyText) as { error?: { message?: string; code?: number } };
-    const code = body.error?.code ?? (Number.isFinite(Number(body.error)) ? Number(body.error) : undefined);
-    detail = typeof body.error?.message === "string" ? body.error.message : "";
+    const body = JSON.parse(bodyText) as { error?: { message?: string; code?: number } | string };
+    if (typeof body.error === "string") {
+      errorMessage = body.error;
+    } else if (body.error && typeof body.error === "object") {
+      errorCode = body.error.code ?? (Number.isFinite(Number((body.error as any).code)) ? Number((body.error as any).code) : undefined);
+      errorMessage = typeof body.error.message === "string" ? body.error.message : "";
+    }
+    detail = errorMessage;
     // Redact anything that could echo credentials (defence in depth).
-    detail = detail.replaceAll(/sk-or-[A-Za-z0-9_-]+/g, "[redacted]").slice(0, 200);
-    if (code === 429) detail = detail || "provider rate limit exceeded";
+    detail = detail.replaceAll(/sk-or-[A-Za-z0-9_-]+/g, "[redacted]").slice(0, 300);
+    if (errorCode === 429) detail = detail || "provider rate limit exceeded";
   } catch {
     detail = bodyText.slice(0, 200).replaceAll(/sk-or-[A-Za-z0-9_-]+/g, "[redacted]");
   }
+
+  const combined = (detail + " " + errorMessage).toLowerCase();
+  const isDailyQuotaExhausted =
+    combined.includes("daily") ||
+    combined.includes("day limit") ||
+    combined.includes("quota exceeded") && (combined.includes("daily") || combined.includes("account")) ||
+    combined.includes("credits exhausted") ||
+    combined.includes("credit balance") && combined.includes("exhaust");
+
+  const retryAfterHeader = headers?.get("Retry-After");
+  const retryAfterParsed = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+  const retryAfterMs = Number.isFinite(retryAfterParsed) && retryAfterParsed > 0 ? retryAfterParsed * 1000 : null;
+
   if (status === 401 || status === 403) {
     return new LlmError(`OpenRouter rejected the server's API credentials (HTTP ${status}).`, "AUTH");
   }
   if (status === 429) {
-    return new LlmError("OpenRouter rate limit or free-tier daily quota exceeded (HTTP 429) — retry later.", "RATE_LIMIT");
+    if (isDailyQuotaExhausted) {
+      return new LlmError(
+        "OpenRouter daily/quota limit exhausted (HTTP 429) — account-wide free-tier quota may be reached.",
+        "RATE_LIMIT",
+        retryAfterMs,
+        true,
+      );
+    }
+    return new LlmError(
+      "OpenRouter rate limit exceeded (HTTP 429) — try again later.",
+      "RATE_LIMIT",
+      retryAfterMs,
+      false,
+    );
   }
   if (status === 402) {
-    return new LlmError("OpenRouter reports exhausted free-tier quota or an empty credit balance (HTTP 402).", "RATE_LIMIT");
+    return new LlmError(
+      "OpenRouter reports exhausted free-tier quota or an empty credit balance (HTTP 402).",
+      "RATE_LIMIT",
+      retryAfterMs,
+      true,
+    );
   }
   if (status === 404 || status === 400) {
     const kind: LlmErrorKind = status === 404 || /no endpoints|not found|not a valid model/i.test(detail) ? "UNAVAILABLE_MODEL" : "SERVER";
@@ -96,12 +142,15 @@ function classifyOpenRouterStatus(status: number, bodyText: string): LlmError {
   return new LlmError(`OpenRouter request failed (HTTP ${status})${detail ? `: ${detail}` : ""}.`, "SERVER");
 }
 
-async function chatOpenRouter(system: string, user: string, options: ChatOptions): Promise<string> {
-  const apiKey = aiConfig.openrouterApiKey;
-  if (!apiKey) throw new LlmError("The hosted AI provider is not configured on the server (OPENROUTER_API_KEY is missing).", "CONFIG");
-
+async function chatWithModel(
+  model: string,
+  apiKey: string,
+  system: string,
+  user: string,
+  options: ChatOptions,
+): Promise<string> {
   const body = {
-    model: aiConfig.openrouterModel,
+    model,
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
@@ -117,6 +166,7 @@ async function chatOpenRouter(system: string, user: string, options: ChatOptions
 
   const deadline = Date.now() + (options.timeoutMs ?? aiConfig.llmTimeoutMs);
   let lastError: LlmError = new LlmError("OpenRouter request failed.", "SERVER");
+
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw lastError;
@@ -136,12 +186,15 @@ async function chatOpenRouter(system: string, user: string, options: ChatOptions
       continue; // single bounded retry on transport failure/timeout
     }
     if (!res.ok) {
-      lastError = classifyOpenRouterStatus(res.status, await res.text().catch(() => ""));
+      lastError = classifyOpenRouterStatus(res.status, await res.text().catch(() => ""), res.headers);
       const retryable =
         lastError.kind === "RATE_LIMIT" || lastError.kind === "SERVER" || lastError.kind === "UNAVAILABLE_MODEL";
+      // For rate limits, respect Retry-After if present
       if (retryable && attempt < MAX_ATTEMPTS) {
-        const parsed = Number(res.headers.get("Retry-After"));
-        const waitMs = Math.min(RETRY_AFTER_CAP_MS, Number.isFinite(parsed) && parsed > 0 ? parsed * 1000 : RETRY_BACKOFF_MS);
+        const waitMs = Math.min(
+          RETRY_AFTER_CAP_MS,
+          lastError.retryAfterMs && lastError.retryAfterMs > 0 ? lastError.retryAfterMs : RETRY_BACKOFF_MS,
+        );
         await new Promise((r) => setTimeout(r, waitMs));
         continue;
       }
@@ -169,6 +222,33 @@ async function chatOpenRouter(system: string, user: string, options: ChatOptions
     return content;
   }
   throw lastError;
+}
+
+async function chatOpenRouter(system: string, user: string, options: ChatOptions): Promise<string> {
+  const apiKey = aiConfig.openrouterApiKey;
+  if (!apiKey) throw new LlmError("The hosted AI provider is not configured on the server (OPENROUTER_API_KEY is missing).", "CONFIG");
+
+  const primaryModel = aiConfig.openrouterModel;
+  const fallbackModel = aiConfig.llmModelFallback;
+
+  try {
+    return await chatWithModel(primaryModel, apiKey, system, user, options);
+  } catch (err) {
+    if (!(err instanceof LlmError)) throw err;
+    // Only fallback on transient rate limits, not on daily quota exhaustion or auth/config issues
+    if (err.kind === "RATE_LIMIT" && !err.isDailyQuotaExhausted && fallbackModel && fallbackModel !== primaryModel) {
+      try {
+        // Add a small delay before fallback
+        const waitMs = Math.min(RETRY_AFTER_CAP_MS, err.retryAfterMs && err.retryAfterMs > 0 ? err.retryAfterMs : RETRY_BACKOFF_MS);
+        await new Promise((r) => setTimeout(r, waitMs));
+        return await chatWithModel(fallbackModel, apiKey, system, user, options);
+      } catch (fallbackErr) {
+        // If fallback also fails, throw the original error or fallback error
+        throw fallbackErr instanceof LlmError ? fallbackErr : err;
+      }
+    }
+    throw err;
+  }
 }
 
 async function chatOllama(system: string, user: string, options: ChatOptions): Promise<string> {

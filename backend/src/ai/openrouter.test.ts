@@ -160,6 +160,77 @@ describe("OpenRouter chat()", () => {
     await assert.rejects(() => chat("s", "u", { timeoutMs: 3_000 }), (e: AiError) => e.kind === "NETWORK");
     assert.equal(calls.length, 2);
   });
+
+  test("Gemma returns 429 (transient) and falls back to secondary model successfully", async () => {
+    const savedFallback = process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
+    process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = "google/gemma-4-26b-a4b-it:free";
+    // Reload config behavior by accessing fresh values
+    (aiConfig as any).openrouterModelFallback = "google/gemma-4-26b-a4b-it:free";
+    try {
+      calls.length = 0;
+      installFetch(async (url, init) => {
+        const body = JSON.parse(String(init?.body)) as { model: string };
+        if (body.model === aiConfig.openrouterModel) {
+          return jsonRes(429, JSON.stringify({ error: { message: "Rate limit exceeded", code: 429 } }), { "Retry-After": "1" });
+        }
+        if (body.model === "google/gemma-4-26b-a4b-it:free") {
+          return ok({ choices: [{ message: { content: "fallback answer" }, finish_reason: "stop" }] });
+        }
+        return jsonRes(500, "{}");
+      });
+      const out = await chat("s", "u", { timeoutMs: 10_000 });
+      assert.equal(out, "fallback answer");
+      assert.equal(calls.length >= 2, true, "should attempt primary and fallback");
+    } finally {
+      if (savedFallback) process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = savedFallback;
+      else delete process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
+      (aiConfig as any).openrouterModelFallback = savedFallback && savedFallback.trim() ? savedFallback.trim() : null;
+    }
+  });
+
+  test("daily quota exhaustion (429 with daily/quota message) does NOT fallback", async () => {
+    const savedFallback = process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
+    process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = "google/gemma-4-26b-a4b-it:free";
+    (aiConfig as any).openrouterModelFallback = "google/gemma-4-26b-a4b-it:free";
+    try {
+      calls.length = 0;
+      installFetch(async () => {
+        return jsonRes(429, JSON.stringify({ error: { message: "Daily quota exceeded for this account", code: 429 } }));
+      });
+      await assert.rejects(
+        () => chat("s", "u", { timeoutMs: 5_000 }),
+        (e: AiError) => e.kind === "RATE_LIMIT",
+      );
+      assert.equal(calls.length, 2, "only primary retried, no fallback on daily quota exhaustion");
+    } finally {
+      if (savedFallback) process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = savedFallback;
+      else delete process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
+      (aiConfig as any).openrouterModelFallback = savedFallback && savedFallback.trim() ? savedFallback.trim() : null;
+    }
+  });
+
+  test("both models rate-limited → surfaces final error", async () => {
+    const savedFallback = process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
+    process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = "google/gemma-4-26b-a4b-it:free";
+    (aiConfig as any).openrouterModelFallback = "google/gemma-4-26b-a4b-it:free";
+    try {
+      calls.length = 0;
+      installFetch(async (url, init) => {
+        const body = JSON.parse(String(init?.body)) as { model: string };
+        // Both return transient rate limits
+        return jsonRes(429, JSON.stringify({ error: { message: "Rate limit exceeded", code: 429 } }), { "Retry-After": "1" });
+      });
+      await assert.rejects(
+        () => chat("s", "u", { timeoutMs: 10_000 }),
+        (e: AiError) => e.kind === "RATE_LIMIT",
+      );
+      assert.ok(calls.length >= 4, "retries on primary and then tries fallback with retries");
+    } finally {
+      if (savedFallback) process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = savedFallback;
+      else delete process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
+      (aiConfig as any).openrouterModelFallback = savedFallback && savedFallback.trim() ? savedFallback.trim() : null;
+    }
+  });
 });
 
 describe("OpenRouter embeddings", () => {

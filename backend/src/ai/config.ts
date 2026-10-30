@@ -69,6 +69,12 @@ export const aiConfig = {
    */
   openrouterModel: process.env["OPENROUTER_LLM_MODEL"] ?? "google/gemma-4-31b-it:free",
   /**
+   * Optional secondary/fallback chat model for free-tier use. If the primary
+   * hits a transient 429, the client may retry with this model once before
+   * giving up. Leave unset to disable fallback.
+   */
+  openrouterModelFallback: (process.env["OPENROUTER_LLM_MODEL_FALLBACK"] ?? "").trim() || null,
+  /**
    * Hosted embedding model for the RAG index/query pairs. FREE on OpenRouter
    * (pricing 0); output dimensionality is discovered from the first response
    * (see embedding.ts) because OpenRouter's catalog does not publish it.
@@ -78,6 +84,10 @@ export const aiConfig = {
   /** Generative LLM — runtime-dependent (local qwen3:4b vs hosted OpenRouter model). */
   get llmModel(): string {
     return this.runtime === "OPENROUTER" ? this.openrouterModel : process.env["AI_LLM_MODEL"] ?? "qwen3:4b-instruct-2507-q4_K_M";
+  },
+  /** Fallback LLM model (OpenRouter only). */
+  get llmModelFallback(): string | null {
+    return this.runtime === "OPENROUTER" ? this.openrouterModelFallback : null;
   },
   /** Embedding model — runtime-dependent (local Qwen3-0.6B vs hosted OpenRouter model). */
   get embeddingModel(): string {

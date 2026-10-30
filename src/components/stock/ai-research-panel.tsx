@@ -157,13 +157,32 @@ export function AiResearchPanel({ symbol }: { symbol: string }) {
         ? "text-loss"
         : "text-muted-foreground";
 
+  // Accurate model label: sourced from the backend (/ai/status) so the badge
+  // always names the runtime actually configured server-side, never a stale
+  // guess. Falls back to a neutral label while the status is loading.
+  const aiStatusQuery = useQuery({
+    queryKey: ["ai-status"],
+    queryFn: () => researchService.getAiStatus(),
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
+  const aiStatus = aiStatusQuery.data;
+  const modelLabel = aiStatus?.runtime === "OPENROUTER"
+    ? aiStatus.llmModel.split("/").pop()?.replace(/:free$/, "") ?? "hosted model"
+    : aiStatus?.runtime === "OLLAMA"
+      ? (aiStatus.llmModel.split("/").pop()?.split(":")[0] ?? "Qwen3-4B")
+      : null;
+  const provenance = aiStatus?.runtime === "OPENROUTER" ? "hosted" : aiStatus?.runtime === "OLLAMA" ? "local" : null;
+
   return (
     <div className="space-y-4">
       <section className="panel space-y-3 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Brain className="h-4 w-4 text-muted-foreground" />
           <h2 className="text-sm font-semibold">AI Deep Analysis</h2>
-          <Badge variant="outline" className="text-[10px]">Qwen3-4B · local · grounded</Badge>
+          <Badge variant="outline" className="text-[10px]">
+            {modelLabel ? `${modelLabel} · ${provenance} · grounded` : "AI · evidence-grounded"}
+          </Badge>
         </div>
         <p className="text-xs text-muted-foreground">
           Runs in the background on the server — you can freely navigate to other pages or close the tab; when you

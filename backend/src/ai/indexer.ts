@@ -87,6 +87,34 @@ export function indexStatus() {
 }
 
 // ---------------------------------------------------------------------
+// Lazy self-healing for hosted runtimes. On Render (or any fresh process)
+// the FAISS artifacts live on an ephemeral disk, so the index starts empty
+// after every deploy. Instead of requiring an admin curl before Deep
+// Analysis can ever work, the first AI query that needs the index triggers
+// a bounded, single-flight rebuild from PostgreSQL here. A recent failure
+// is remembered briefly so a burst of queries cannot hammer the provider.
+// ---------------------------------------------------------------------
+
+let lastEnsureFailure: { at: number; error: string } | null = null;
+const FAILURE_COOLDOWN_MS = 2 * 60_000;
+
+export async function ensureIndexReady(): Promise<{ ok: boolean; rebuilt: boolean; documentsIndexed: number; reason?: string }> {
+  vectorStore.ensureLoaded(); // restart resilience first
+  if (vectorStore.exists && vectorStore.size > 0) return { ok: true, rebuilt: false, documentsIndexed: vectorStore.size };
+  if (lastEnsureFailure && Date.now() - lastEnsureFailure.at < FAILURE_COOLDOWN_MS) {
+    return { ok: false, rebuilt: false, documentsIndexed: 0, reason: lastEnsureFailure.error };
+  }
+  const result = await rebuildIndex();
+  if (result.ok && result.documentsIndexed > 0) {
+    lastEnsureFailure = null;
+    return { ok: true, rebuilt: true, documentsIndexed: result.documentsIndexed };
+  }
+  const reason = result.error ?? "index rebuild produced no documents";
+  lastEnsureFailure = { at: Date.now(), error: reason };
+  return { ok: false, rebuilt: true, documentsIndexed: 0, reason };
+}
+
+// ---------------------------------------------------------------------
 // Incremental indexing (Prompt 2+3): append NEW important-event documents
 // without a full rebuild. Single-flight shared with rebuild; a failed
 // append leaves the previous valid index untouched (artifacts are only

@@ -20,6 +20,7 @@ import { aiConfig } from "../config.js";
 import { chat, LlmError } from "../llm.js";
 import { probeServer } from "../embedding.js";
 import { vectorStore } from "../vector-store.js";
+import { isIndexing, ensureIndexReady } from "../indexer.js";
 import { buildStockContext, type StockContext } from "./stock-context.service.js";
 import { retrieveResearchEvidence } from "./research-retrieval.service.js";
 import { decide, type DecisionResult } from "./decision-engine.service.js";
@@ -263,13 +264,18 @@ export async function analyzeStockDeep(input: {
   }
   const models = await probeServer();
   if (!models.reachable) {
-    return { status: "UNAVAILABLE", reason: "The local AI runtime is unreachable. Start Ollama and try again — all other PortfolioIQ features work without it." };
+    return { status: "UNAVAILABLE", reason: providerUnreachableReason(models.reason) };
   }
-  if (!vectorStore.exists || vectorStore.size === 0) {
-    vectorStore.ensureLoaded(); // restart resilience (same fix as ai/service.ts)
-  }
-  if (!vectorStore.exists || vectorStore.size === 0) {
-    return { status: "UNAVAILABLE", reason: "The AI knowledge index is empty — an administrator must build it first (POST /api/admin/ai/index/rebuild)." };
+  // Hosted/ephemeral-disk self-healing (OPENROUTER runtime only — local
+  // OLLAMA keeps its admin-built index contract):
+  if (aiConfig.runtime === "OPENROUTER" && !(vectorStore.exists && vectorStore.size > 0) && !isIndexing()) {
+    const ensured = await ensureIndexReady();
+    if (!ensured.ok) {
+      return {
+        status: "UNAVAILABLE",
+        reason: `The AI knowledge index is empty and could not be rebuilt: ${ensured.reason ?? "unknown error"}. An administrator can also run POST /api/admin/ai/index/rebuild.`,
+      };
+    }
   }
 
   // 1) Authoritative context.
@@ -319,13 +325,14 @@ export async function analyzeStockDeep(input: {
     // cap truncates the JSON mid-object; a 240 s wall covers cold starts.
     chat(RESEARCH_SYSTEM, prompt, { maxTokens: 3500, numCtx: 8192, temperature: 0.2, timeoutMs: 240_000 });
   try {
-    // The research JSON contract is large: budget ~2500 output tokens inside an
-    // 8192-token window (prompt ≈ 2.3k tokens; 4B q4 + 8k KV ≈ 3.7 GB VRAM, fits
-    // a 6 GB GPU). A 240 s wall covers slow first-generation on cold start.
+    // maxTokens 3500 caps the research JSON output. On OPENROUTER the default
+    // free model's output cap (32768) is far larger, and numCtx is
+    // Ollama-specific there anyway. The 240 s wall covers slow cold starts on
+    // both runtimes.
     raw = await attemptChat();
   } catch (err) {
-    const reason = err instanceof LlmError ? err.message : "LLM generation failed";
-    console.error(`[research] generation failed: ${reason}`);
+    const reason = err instanceof LlmError ? userSafeLlmReason(err) : "LLM generation failed";
+    console.error(`[research] generation failed: ${err instanceof Error ? err.message : String(err)}`);
     return { status: "UNAVAILABLE", reason };
   }
   const llmMs = Date.now() - llmStart;
@@ -339,8 +346,8 @@ export async function analyzeStockDeep(input: {
       try {
         raw = await attemptChat();
       } catch (retryErr) {
-        const reason = retryErr instanceof LlmError ? retryErr.message : "LLM generation failed";
-        console.error(`[research] retry generation failed: ${reason}`);
+        const reason = retryErr instanceof LlmError ? userSafeLlmReason(retryErr) : "LLM generation failed";
+        console.error(`[research] retry generation failed: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`);
         return { status: "UNAVAILABLE", reason };
       }
       try {
@@ -488,6 +495,42 @@ function assembleReport(
       dataQualityNotes: ctx.freshness.notes,
     },
   };
+}
+
+/** Runtime-accurate, user-safe reason for an unreachable model provider. */
+function providerUnreachableReason(probeReason?: string): string {
+  if (aiConfig.runtime === "OPENROUTER") {
+    if (!aiConfig.openrouterApiKey) {
+      return "Hosted AI is not configured on the server: OPENROUTER_API_KEY is missing. An administrator must add it in the Render environment — all other PortfolioIQ features work without it.";
+    }
+    return probeReason ?? "The hosted AI provider (OpenRouter) is unreachable right now — all other PortfolioIQ features work without it.";
+  }
+  return "The local AI runtime is unreachable. Start Ollama and try again — all other PortfolioIQ features work without it.";
+}
+
+/**
+ * Map typed LLM failures to user-safe reasons. Distinguishes: missing server
+ * configuration / provider authentication / rate limits & model availability /
+ * general inference failures. Raw provider internals and stack traces never
+ * reach the user; the console gets the full detail instead.
+ */
+function userSafeLlmReason(err: LlmError): string {
+  switch (err.kind) {
+    case "CONFIG":
+      return "Hosted AI is not configured on the server (OPENROUTER_API_KEY missing).";
+    case "AUTH":
+      return "The AI provider rejected the server's credentials — an administrator must check OPENROUTER_API_KEY.";
+    case "RATE_LIMIT":
+      return "The AI provider's free-tier rate limit or quota is exhausted — please retry later (limits reset automatically).";
+    case "UNAVAILABLE_MODEL":
+      return "The configured AI model is currently unavailable on the provider — an administrator can switch models via OPENROUTER_LLM_MODEL.";
+    case "TIMEOUT":
+      return "AI inference timed out — please retry.";
+    case "EMPTY":
+      return "The model returned an empty response — please retry.";
+    default:
+      return "AI inference failed — please retry.";
+  }
 }
 
 /** Test/diagnostic visibility. */

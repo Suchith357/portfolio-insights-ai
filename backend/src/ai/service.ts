@@ -17,7 +17,7 @@ import { chat, LlmError } from "./llm.js";
 import { parseStructuredAnalysis, LlmOutputError } from "./output-schema.js";
 import { requiredModelsPresent } from "./embedding.js";
 import { vectorStore } from "./vector-store.js";
-import { indexStatus } from "./indexer.js";
+import { indexStatus, isIndexing, ensureIndexReady } from "./indexer.js";
 import type { GroundedQueryResult, AiStatus } from "./types.js";
 
 export interface QueryInput {
@@ -48,19 +48,17 @@ export async function query(input: QueryInput): Promise<GroundedQueryResult> {
 
   const status = await getStatus();
   if (!status.embeddingServerReachable) {
-    return unavailable(
-      "The local AI runtime is unreachable. Start Ollama (models: qwen3:4b-instruct + qwen3-embedding:0.6b) and try again. PortfolioIQ works fully without it.",
-      0,
-    );
+    return unavailable(unreachableReason(), 0);
   }
-  if (!vectorStore.exists || vectorStore.size === 0) {
-    vectorStore.ensureLoaded(); // restart resilience: hydrate the persisted index before declaring it empty
-  }
-  if (!vectorStore.exists || vectorStore.size === 0) {
-    return unavailable(
-      "The AI knowledge index is empty. An administrator must build it first (POST /api/admin/ai/index/rebuild).",
-      0,
-    );
+  // Hosted/ephemeral-disk self-healing: rebuild the index from PostgreSQL on
+  // the first query when it is empty (single-flight, failure-cooled).
+  // OLLAMA runs keep the previous contract: a local index is admin-built and
+  // a missing one stays an explicit UNAVAILABLE, never a surprise rebuild.
+  if (aiConfig.runtime === "OPENROUTER" && !(vectorStore.exists && vectorStore.size > 0) && !isIndexing()) {
+    const ensured = await ensureIndexReady();
+    if (!ensured.ok) {
+      return unavailable(`The AI knowledge index is empty and could not be rebuilt: ${ensured.reason ?? "unknown error"}. An administrator can also run POST /api/admin/ai/index/rebuild.`, 0);
+    }
   }
   const models = await requiredModelsPresent();
   if (!models.ok) {
@@ -156,7 +154,7 @@ export async function getStatus(): Promise<AiStatus> {
     detail = `Configuration invalid: ${validation.problems.join("; ")}`;
   } else if (!models.models.length) {
     availability = "UNAVAILABLE";
-    detail = "Local model server unreachable — start Ollama to enable AI features. PortfolioIQ works fully without it.";
+    detail = unreachableReason();
   } else if (!idx.indexExists || idx.documentsIndexed === 0) {
     availability = "DEGRADED";
     detail = "Model server reachable but the knowledge index is empty — run an index rebuild (admin).";
@@ -179,4 +177,22 @@ export async function getStatus(): Promise<AiStatus> {
     embeddingServerReachable: models.models.length > 0,
     detail,
   };
+}
+
+/** Runtime-accurate, user-safe reason for an unreachable model provider. */
+function unreachableReason(): string {
+  if (aiConfig.runtime === "OPENROUTER") {
+    if (!aiConfig.openrouterApiKey) {
+      return "Hosted AI is not configured on the server: OPENROUTER_API_KEY is missing. An administrator must add it in the Render environment.";
+    }
+    const problem = aiConfigProblems();
+    if (problem) return problem;
+    return "The hosted AI provider (OpenRouter) is unreachable right now. PortfolioIQ works fully without it.";
+  }
+  return "The local AI runtime is unreachable. Start Ollama (models: qwen3:4b-instruct + qwen3-embedding:0.6b) and try again. PortfolioIQ works fully without it.";
+}
+
+function aiConfigProblems(): string | null {
+  const v = validateAiConfig();
+  return v.valid ? null : `AI configuration is invalid: ${v.problems.join("; ")}`;
 }

@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/src/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:ai": "tsx --test src/ai/ai.test.ts",
+    "test:ai": "tsx --test src/ai/ai.test.ts src/ai/openrouter.test.ts",
     "prisma:generate": "prisma generate",
     "postinstall": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

@@ -39,18 +39,50 @@ export const aiConfig = {
   /** Master switch — with AI_ENABLED=false the module is inert and free. */
   enabled: bool("AI_ENABLED", true),
 
-  /** Runtime: "OLLAMA" is implemented; "NONE" disables remote model calls. Read dynamically so tests/env changes apply. */
+  /**
+   * Runtime, read dynamically so tests/env changes apply.
+   *
+   *  - Explicit AI_RUNTIME wins: OLLAMA | OPENROUTER | NONE.
+   *  - Otherwise the runtime auto-selects: OPENROUTER when OPENROUTER_API_KEY
+   *    is present (hosted inference — used on Render where no GPU/Ollama
+   *    exists), else OLLAMA (local dev with the laptop models).
+   */
   get runtime(): string {
-    return (process.env["AI_RUNTIME"] ?? "OLLAMA").toUpperCase();
+    const explicit = (process.env["AI_RUNTIME"] ?? "").trim().toUpperCase();
+    if (explicit) return explicit;
+    return process.env["OPENROUTER_API_KEY"]?.trim() ? "OPENROUTER" : "OLLAMA";
   },
 
   /** Base URL of the Ollama-compatible local server (localhost only by default). */
   ollamaBaseUrl: process.env["AI_OLLAMA_BASE_URL"] ?? "http://127.0.0.1:11434",
 
-  /** Generative LLM — Qwen3-4B-Instruct in 4-bit quantization (2.5 GB on disk, ~4.5 GB VRAM at ctx 4096). */
-  llmModel: process.env["AI_LLM_MODEL"] ?? "qwen3:4b-instruct-2507-q4_K_M",
-  /** Embedding model — Qwen3-Embedding-0.6B (620 MB on disk, ~0.8 GB VRAM). */
-  embeddingModel: process.env["AI_EMBEDDING_MODEL"] ?? "qwen3-embedding:0.6b",
+  /** Base URL of the OpenRouter REST v1 API (official endpoint). */
+  openrouterBaseUrl: process.env["OPENROUTER_BASE_URL"] ?? "https://openrouter.ai/api/v1",
+  /** OpenRouter API key — read ONLY here, sent only in the Bearer header, never logged/returned. */
+  get openrouterApiKey(): string {
+    return (process.env["OPENROUTER_API_KEY"] ?? "").trim();
+  },
+  /**
+   * Hosted chat model — verified FREE today on OpenRouter's live catalog
+   * (GET /api/v1/models?max_price=0): google/gemma-4-31b-it:free,
+   * context 262144, max output 32768, supports response_format. Overridable.
+   */
+  openrouterModel: process.env["OPENROUTER_LLM_MODEL"] ?? "google/gemma-4-31b-it:free",
+  /**
+   * Hosted embedding model for the RAG index/query pairs. FREE on OpenRouter
+   * (pricing 0); output dimensionality is discovered from the first response
+   * (see embedding.ts) because OpenRouter's catalog does not publish it.
+   */
+  openrouterEmbeddingModel: process.env["OPENROUTER_EMBEDDING_MODEL"] ?? "nvidia/nemotron-3.5-embed-1b:free",
+
+  /** Generative LLM — runtime-dependent (local qwen3:4b vs hosted OpenRouter model). */
+  get llmModel(): string {
+    return this.runtime === "OPENROUTER" ? this.openrouterModel : process.env["AI_LLM_MODEL"] ?? "qwen3:4b-instruct-2507-q4_K_M";
+  },
+  /** Embedding model — runtime-dependent (local Qwen3-0.6B vs hosted OpenRouter model). */
+  get embeddingModel(): string {
+    return this.runtime === "OPENROUTER" ? this.openrouterEmbeddingModel : process.env["AI_EMBEDDING_MODEL"] ?? "qwen3-embedding:0.6b";
+  },
   /** Quantization label, informational — recorded in status/logs. */
   quantization: process.env["AI_LLM_QUANTIZATION"] ?? "q4_K_M",
 
@@ -70,8 +102,22 @@ export const aiConfig = {
   /** Vector index artifacts. */
   indexFilename: "documents.faiss",
   metadataFilename: "documents.json",
-  /** Embedding dimensionality of Qwen3-Embedding-0.6B. */
+  /**
+   * Embedding dimensionality of the ACTIVE embedding model. For OLLAMA this
+   * is fixed (Qwen3-Embedding-0.6B = 1024). For OPENROUTER the real value is
+   * discovered from the first embedding response (see embedding.ts) and
+   * cached here for the process lifetime; the vector store stamps the
+   * model+dim into its metadata sidecar and treats a stale-mixed index as
+   * empty so a model switch can never search across incompatible geometries.
+   */
+  _embeddingDimResolved: false,
   embeddingDim: 1024,
+  noteEmbeddingDiscovered(dim: number): void {
+    if (!Number.isFinite(dim) || dim <= 0) return; // keep previous geometry
+    if (this._embeddingDimResolved && this.embeddingDim === dim) return;
+    this._embeddingDimResolved = true;
+    this.embeddingDim = dim;
+  },
 
   get dataDir(): string {
     const custom = process.env["AI_DATA_DIR"]?.trim();
@@ -94,7 +140,7 @@ export const aiConfig = {
   probeTimeoutMs: num("AI_PROBE_TIMEOUT_MS", 1_500, 250, 15_000),
 };
 
-export type AiRuntime = "OLLAMA" | "NONE";
+export type AiRuntime = "OLLAMA" | "OPENROUTER" | "NONE";
 
 /** Coarse validation at startup; problems are reported, never thrown in a route. */
 export function validateAiConfig(): { valid: boolean; problems: string[] } {
@@ -103,8 +149,13 @@ export function validateAiConfig(): { valid: boolean; problems: string[] } {
   if (aiConfig.minScore < 0 || aiConfig.minScore > 1) problems.push("AI_RAG_MIN_SCORE must be within [0, 1]");
   if (aiConfig.temperature < 0 || aiConfig.temperature > 1) problems.push("AI_LLM_TEMPERATURE must be within [0, 1]");
   if (aiConfig.embeddingDim <= 0) problems.push("embedding dimension must be positive");
-  if (aiConfig.runtime !== "OLLAMA" && aiConfig.runtime !== "NONE") {
-    problems.push(`AI_RUNTIME must be OLLAMA or NONE (got ${aiConfig.runtime})`);
+  if (aiConfig.runtime === "OPENROUTER") {
+    // A missing key is a clear, safe configuration error (surfaced by status
+    // and every AI endpoint as UNAVAILABLE — never thrown from a route).
+    if (!aiConfig.openrouterApiKey) problems.push("OPENROUTER_API_KEY is not set (required by the OPENROUTER runtime)");
+    if (!aiConfig.openrouterBaseUrl.startsWith("https://")) problems.push("OPENROUTER_BASE_URL must be an https:// URL");
+  } else if (aiConfig.runtime !== "OLLAMA" && aiConfig.runtime !== "NONE") {
+    problems.push(`AI_RUNTIME must be OLLAMA, OPENROUTER or NONE (got ${aiConfig.runtime})`);
   }
   return { valid: problems.length === 0, problems };
 }

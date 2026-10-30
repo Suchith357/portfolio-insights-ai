@@ -730,7 +730,7 @@ function AiAssessmentPanel({ eventId }: { eventId: string }) {
     return (
       <div className="rounded-md border border-dashed px-3 py-2">
         <p className="text-xs text-muted-foreground">
-          AI assessment (optional): a locally-run, evidence-grounded reading of this event. It only runs when the
+          AI assessment (optional): a server-side, evidence-grounded reading of this event. It only runs when the
           event passes the importance gate, and every claim must cite retrieved evidence — otherwise it refuses to
           answer. Not a prediction; never investment advice.
         </p>
@@ -782,7 +782,7 @@ function AiAssessmentPanel({ eventId }: { eventId: string }) {
           </p>
         )}
         <p className="text-[11px] opacity-80">
-          Evidence coverage {(a.confidence * 100).toFixed(0)}% · generated locally by Qwen3-4B from the retrieved
+          Evidence coverage {(a.confidence * 100).toFixed(0)}% · generated on the server from the retrieved
           evidence only · may/uncertain language by design · not investment advice.
         </p>
       </div>

@@ -103,3 +103,21 @@ export async function getLatestAnalysis(symbol: string, mode?: "BUY" | "PORTFOLI
   if (mode) params.set("mode", mode);
   return apiRequest<AnalysisJobView | null>(`/ai/stock/jobs/latest?${params.toString()}`);
 }
+
+/** GET /ai/status — model/runtime information for accurate UI labels. */
+export interface AiStatusView {
+  availability: "READY" | "DEGRADED" | "UNAVAILABLE" | "DISABLED";
+  runtime: string;
+  llmModel: string;
+  embeddingModel: string;
+  quantization: string | null;
+  documentsIndexed: number;
+  indexExists: boolean;
+  lastIndexedAt: string | null;
+  embeddingServerReachable: boolean;
+  detail: string;
+}
+
+export async function getAiStatus(): Promise<AiStatusView> {
+  return apiRequest<AiStatusView>("/ai/status");
+}

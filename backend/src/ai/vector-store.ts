@@ -18,7 +18,25 @@ interface StoredMeta extends DocumentMetadata {
   content: string;
 }
 
+/**
+ * Geometry stamp written into the metadata sidecar. The index and its query
+ * embeddings MUST come from the same embedding model/dimension; when the
+ * stamp disagrees with the current runtime that store is treated as empty so
+ * a runtime/model switch (e.g. Ollama ↔ hosted OpenRouter) can never search
+ * across incompatible vector geometries.
+ */
+interface GeometryStamp {
+  embeddingModel: string;
+  embeddingDim: number;
+}
+
 export class VectorStore {
+  private stamp: GeometryStamp | null = null;
+
+  private geometryMatches(): boolean {
+    if (!this.stamp) return true; // legacy sidecar without a stamp — accept only if dim matches
+    return this.stamp.embeddingModel === aiConfig.embeddingModel && this.stamp.embeddingDim === aiConfig.embeddingDim;
+  }
   private index: faiss.IndexFlatIP | null = null;
   private metadata: StoredMeta[] = [];
 
@@ -44,14 +62,30 @@ export class VectorStore {
     if (!this.exists) return this;
     try {
       this.index = faiss.IndexFlatIP.read(aiConfig.indexPath);
-      const raw = JSON.parse(fs.readFileSync(aiConfig.metadataPath, "utf-8")) as { documents: StoredMeta[] };
+      const raw = JSON.parse(fs.readFileSync(aiConfig.metadataPath, "utf-8")) as {
+        documents: StoredMeta[];
+        embeddingModel?: string;
+        embeddingDim?: number;
+      };
       this.metadata = raw.documents ?? [];
-      if (this.index && this.index.ntotal() !== this.metadata.length) {
+      this.stamp =
+        raw.embeddingModel !== undefined && raw.embeddingDim !== undefined
+          ? { embeddingModel: raw.embeddingModel, embeddingDim: raw.embeddingDim }
+          : null;
+      if (!this.geometryMatches()) {
+        console.warn(
+          `[ai:store] index geometry mismatch (index=${this.stamp ? `${this.stamp.embeddingModel}/${this.stamp.embeddingDim}` : "untrusted"}, runtime=${aiConfig.embeddingModel}/${aiConfig.embeddingDim}) — treating index as empty; rebuild required.`,
+        );
+        this.index = new faiss.IndexFlatIP(aiConfig.embeddingDim);
+        this.metadata = [];
+        this.stamp = null;
+      } else if (this.index && this.index.ntotal() !== this.metadata.length) {
         console.warn(
           `[ai:store] index/metadata mismatch (index=${this.index.ntotal()}, metadata=${this.metadata.length}) — treating index as empty; rebuild required.`,
         );
         this.index = new faiss.IndexFlatIP(aiConfig.embeddingDim);
         this.metadata = [];
+        this.stamp = null;
       }
     } catch (err) {
       console.error(`[ai:store] failed to load index (${(err as Error).message}) — starting empty.`);
@@ -80,6 +114,7 @@ export class VectorStore {
     if (vectors.length > 0) index.add(vectors.flat());
     this.index = index;
     this.metadata = documents.map((d) => ({ ...d.meta, title: d.title, content: d.content }));
+    this.stamp = { embeddingModel: aiConfig.embeddingModel, embeddingDim: aiConfig.embeddingDim };
     this.save();
   }
 
@@ -101,6 +136,7 @@ export class VectorStore {
     }
     this.index.add(vectors.flat());
     this.metadata.push(...documents.map((d) => ({ ...d.meta, title: d.title, content: d.content })));
+    this.stamp = { embeddingModel: aiConfig.embeddingModel, embeddingDim: aiConfig.embeddingDim };
     this.save();
   }
 
@@ -152,7 +188,15 @@ export class VectorStore {
       this.index.write(tmpIndex);
       fs.renameSync(tmpIndex, aiConfig.indexPath);
     }
-    writeAtomic(aiConfig.metadataPath, JSON.stringify({ indexedAt: new Date().toISOString(), documents: this.metadata }));
+    writeAtomic(
+      aiConfig.metadataPath,
+      JSON.stringify({
+        indexedAt: new Date().toISOString(),
+        embeddingModel: aiConfig.embeddingModel,
+        embeddingDim: aiConfig.embeddingDim,
+        documents: this.metadata,
+      }),
+    );
   }
 
   /** Remove store artifacts (admin reset). */
@@ -166,6 +210,7 @@ export class VectorStore {
     }
     this.index = null;
     this.metadata = [];
+    this.stamp = null;
   }
 }
 

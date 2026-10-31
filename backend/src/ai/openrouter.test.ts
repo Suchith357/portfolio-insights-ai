@@ -209,6 +209,45 @@ describe("OpenRouter chat()", () => {
     }
   });
 
+  test("primary model delisted (404) → single fallback attempt, not an account-wide stop", async () => {
+    const savedFallback = process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
+    process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = "google/gemma-4-26b-a4b-it:free";
+    (aiConfig as any).openrouterModelFallback = "google/gemma-4-26b-a4b-it:free";
+    try {
+      calls.length = 0;
+      installFetch(async (url, init) => {
+        const body = JSON.parse(String(init?.body)) as { model: string };
+        if (body.model === aiConfig.openrouterModel) {
+          return jsonRes(404, JSON.stringify({ error: { message: "Model not found", code: 404 } }));
+        }
+        return ok({ choices: [{ message: { content: "fallback after 404" }, finish_reason: "stop" }] });
+      });
+      const out = await chat("s", "u", { timeoutMs: 10_000 });
+      assert.equal(out, "fallback after 404");
+      assert.equal(calls.length, 2, "one primary 404 + one fallback success — no retry storm");
+    } finally {
+      if (savedFallback) process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = savedFallback;
+      else delete process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
+      (aiConfig as any).openrouterModelFallback = savedFallback && savedFallback.trim() ? savedFallback.trim() : null;
+    }
+  });
+
+  test("auth failure (401) never cascades to the fallback model", async () => {
+    const savedFallback = process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
+    process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = "google/gemma-4-26b-a4b-it:free";
+    (aiConfig as any).openrouterModelFallback = "google/gemma-4-26b-a4b-it:free";
+    try {
+      calls.length = 0;
+      installFetch(async () => jsonRes(401, JSON.stringify({ error: { message: "Invalid key", code: 401 } })));
+      await assert.rejects(() => chat("s", "u", { timeoutMs: 5_000 }), (e: AiError) => e.kind === "AUTH");
+      assert.equal(calls.length, 1, "no fallback attempt with a bad key");
+    } finally {
+      if (savedFallback) process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = savedFallback;
+      else delete process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
+      (aiConfig as any).openrouterModelFallback = savedFallback && savedFallback.trim() ? savedFallback.trim() : null;
+    }
+  });
+
   test("both models rate-limited → surfaces final error", async () => {
     const savedFallback = process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
     process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = "google/gemma-4-26b-a4b-it:free";
@@ -263,12 +302,77 @@ describe("OpenRouter embeddings", () => {
   test("embeddings auth/quota/model/shape failures map to typed errors", async () => {
     installFetch(async () => jsonRes(401, "{}"));
     await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "AUTH");
-    installFetch(async () => jsonRes(429, "{}"));
+    calls.length = 0;
+    installFetch(async () => jsonRes(429, JSON.stringify({ error: { message: "Rate limit exceeded" } }), { "Retry-After": "1" }));
     await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "RATE_LIMIT");
     installFetch(async () => jsonRes(404, "{}"));
     await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "UNAVAILABLE");
     installFetch(async () => ok({ data: [{}] }));
     await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "SHAPE");
+  });
+
+  test("embedding 429 respects Retry-After and stops on daily/quota exhaustion", async () => {
+    calls.length = 0;
+    installFetch(async () => jsonRes(429, JSON.stringify({ error: { message: "Daily quota exceeded for this account" } }), { "Retry-After": "5" }));
+    await assert.rejects(
+      () => embedMany(["x"]),
+      (e: any) => e.kind === "RATE_LIMIT" && e.isDailyQuotaExhausted === true,
+    );
+    assert.equal(calls.length, 1, "should not retry on daily/quota exhaustion");
+  });
+
+  test("embedding falls back to secondary model on transient 429 if configured", async () => {
+    const saved = (aiConfig as any).openrouterEmbeddingModelFallback;
+    (aiConfig as any).openrouterEmbeddingModelFallback = "text-embedding-3-small";
+    try {
+      calls.length = 0;
+      installFetch(async (url, init) => {
+        const body = JSON.parse(String(init?.body)) as { model: string };
+        if (body.model === aiConfig.openrouterEmbeddingModel) {
+          return jsonRes(429, JSON.stringify({ error: { message: "Rate limit exceeded" } }), { "Retry-After": "1" });
+        }
+        if (body.model === "text-embedding-3-small") {
+          return ok({ data: [{ index: 0, embedding: [0.1, 0.2, 0.3] }] });
+        }
+        return jsonRes(500, "{}");
+      });
+      const out = await embedMany(["x"]);
+      assert.equal(out.length, 1);
+      assert.equal(aiConfig.embeddingDim, 3, "dims stamped from the response for the geometry check");
+    } finally {
+      (aiConfig as any).openrouterEmbeddingModelFallback = saved;
+    }
+  });
+
+  test("embedding model delisted (404) → single fallback attempt; no cascade when unconfigured", async () => {
+    const saved = (aiConfig as any).openrouterEmbeddingModelFallback;
+    try {
+      // 1) With a secondary configured: one primary 404, one fallback success.
+      (aiConfig as any).openrouterEmbeddingModelFallback = "backup-embed-model:free";
+      calls.length = 0;
+      installFetch(async (url, init) => {
+        const body = JSON.parse(String(init?.body)) as { model: string };
+        if (body.model === aiConfig.openrouterEmbeddingModel) {
+          return jsonRes(404, JSON.stringify({ error: { message: "Model not found", code: 404 } }));
+        }
+        return ok({ data: [{ index: 0, embedding: [0.3, 0.4] }] });
+      });
+      const out = await embedMany(["x"]);
+      assert.equal(out.length, 1);
+      assert.equal(calls.length, 2, "primary 404 + fallback only — no retry storm");
+
+      // 2) Without a secondary: the typed UNAVAILABLE error surfaces immediately.
+      (aiConfig as any).openrouterEmbeddingModelFallback = null;
+      calls.length = 0;
+      installFetch(async () => jsonRes(404, JSON.stringify({ error: { message: "Model not found", code: 404 } })));
+      await assert.rejects(
+        () => embedMany(["x"]),
+        (e: AiError) => e.kind === "UNAVAILABLE" && /OPENROUTER_EMBEDDING_MODEL/.test(e.message),
+      );
+      assert.equal(calls.length, 1);
+    } finally {
+      (aiConfig as any).openrouterEmbeddingModelFallback = saved;
+    }
   });
 });
 

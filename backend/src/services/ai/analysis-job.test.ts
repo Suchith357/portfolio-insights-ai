@@ -40,12 +40,17 @@ describe("Req 4-6 — analysis job store", async () => {
   });
 
   test("getLatestJob returns the most recent job for symbol+user across modes", () => {
+    // Relative timestamps: the store sweeps jobs older than its TTL (default
+    // 120 min), so hard-coded past dates eventually expire and make this test
+    // fail on the calendar instead of on behaviour.
+    const earlier = new Date(Date.now() - 90_000).toISOString();
+    const later = new Date(Date.now() - 30_000).toISOString();
     __injectJobForTest({
-      ...base, jobId: "33333333-3333-4333-8333-333333333333", createdAt: "2026-09-22T10:00:00.000Z",
+      ...base, jobId: "33333333-3333-4333-8333-333333333333", createdAt: earlier,
     });
     __injectJobForTest({
       ...base, jobId: "44444444-4444-4444-8444-444444444444", mode: "PORTFOLIO", status: "FAILED" as never,
-      createdAt: "2026-09-22T11:00:00.000Z",
+      createdAt: later,
     });
     const latest = getLatestJob("RELIANCE", 7);
     assert.equal(latest?.jobId, "44444444-4444-4444-8444-444444444444");
@@ -75,7 +80,7 @@ describe("Req 4-6 — analysis job store", async () => {
         ...base,
         jobId: `77777777-0000-4000-8000-${String(i).padStart(12, "0")}`,
         symbol: `S${i}`,
-        createdAt: new Date(Date.parse("2026-09-22T00:00:00Z") + i * 1000).toISOString(),
+        createdAt: new Date(Date.now() - (250 - i) * 1000).toISOString(),
       });
     }
     assert.ok(jobCount() <= 200, `store size ${jobCount()} must be hard-bounded at 200`);

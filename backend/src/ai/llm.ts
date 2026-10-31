@@ -187,8 +187,11 @@ async function chatWithModel(
     }
     if (!res.ok) {
       lastError = classifyOpenRouterStatus(res.status, await res.text().catch(() => ""), res.headers);
-      const retryable =
-        lastError.kind === "RATE_LIMIT" || lastError.kind === "SERVER" || lastError.kind === "UNAVAILABLE_MODEL";
+      // Retry IN-LOOP only for transient conditions on the SAME model. A 404 /
+      // "no endpoints" (UNAVAILABLE_MODEL) is deterministic for this model —
+      // retrying it only burns the Retry-After window; chatOpenRouter handles
+      // it with a single fallback-model attempt instead.
+      const retryable = lastError.kind === "RATE_LIMIT" || lastError.kind === "SERVER";
       // For rate limits, respect Retry-After if present
       if (retryable && attempt < MAX_ATTEMPTS) {
         const waitMs = Math.min(
@@ -235,12 +238,29 @@ async function chatOpenRouter(system: string, user: string, options: ChatOptions
     return await chatWithModel(primaryModel, apiKey, system, user, options);
   } catch (err) {
     if (!(err instanceof LlmError)) throw err;
-    // Only fallback on transient rate limits, not on daily quota exhaustion or auth/config issues
-    if (err.kind === "RATE_LIMIT" && !err.isDailyQuotaExhausted && fallbackModel && fallbackModel !== primaryModel) {
+    // Fallback policy — ONLY for failures that are specific to the primary
+    // model/its upstream provider, never for account-wide conditions:
+    //   - RATE_LIMIT (transient 429/402): per-minute or per-provider limit,
+    //     a different model may still have headroom. Confirmed daily/account
+    //     quota exhaustion (isDailyQuotaExhausted) is account-wide → NO cascade.
+    //   - UNAVAILABLE_MODEL (404 / "no endpoints"): this model was delisted or
+    //     has no serving endpoint right now — model-specific, not an account cap.
+    //   - SERVER (5xx from the upstream provider): transient provider fault on
+    //     this model's route; a single secondary model is a bounded, sensible try.
+    // AUTH/CONFIG/TIMEOUT/NETWORK/EMPTY never trigger a model cascade.
+    const fallbackEligible =
+      err.kind === "UNAVAILABLE_MODEL" ||
+      err.kind === "SERVER" ||
+      (err.kind === "RATE_LIMIT" && !err.isDailyQuotaExhausted);
+    if (fallbackEligible && fallbackModel && fallbackModel !== primaryModel) {
       try {
-        // Add a small delay before fallback
-        const waitMs = Math.min(RETRY_AFTER_CAP_MS, err.retryAfterMs && err.retryAfterMs > 0 ? err.retryAfterMs : RETRY_BACKOFF_MS);
-        await new Promise((r) => setTimeout(r, waitMs));
+        // Honour Retry-After before the fallback when a rate limit supplied one
+        // (bounded so chat can never stall for minutes).
+        const waitMs = Math.min(
+          RETRY_AFTER_CAP_MS,
+          err.retryAfterMs && err.retryAfterMs > 0 ? err.retryAfterMs : RETRY_BACKOFF_MS,
+        );
+        if (err.kind === "RATE_LIMIT") await new Promise((r) => setTimeout(r, waitMs));
         return await chatWithModel(fallbackModel, apiKey, system, user, options);
       } catch (fallbackErr) {
         // If fallback also fails, throw the original error or fallback error

@@ -129,7 +129,12 @@ export function AiResearchPanel({ symbol }: { symbol: string }) {
       const { jobId } = await researchService.startAnalysis(upper, mode, ask.trim() || undefined);
       activeJobRef.current = jobId;
       completedRef.current = false;
-      // Seed the poll cache and attach immediately.
+      // Seed the poll cache for the new key. The next render computes
+      // activeJobId = jobId, which switches the query key and React Query
+      // fetches it automatically (enabled: !!activeJobId).
+      // NOTE: never call the stale `jobQuery.refetch()` captured from this
+      // render — its key/`activeJobId` closure is still null and would request
+      // GET /ai/stock/jobs/null (HTTP 400), the bug behind the production log.
       qc.setQueryData(["research-job", jobId], {
         jobId,
         symbol: upper,
@@ -142,7 +147,6 @@ export function AiResearchPanel({ symbol }: { symbol: string }) {
         report: null,
         error: null,
       });
-      await jobQuery.refetch();
     } catch (err) {
       setStartError(err instanceof Error ? err.message : "Could not start the analysis.");
     } finally {

@@ -80,6 +80,8 @@ export const aiConfig = {
    * (see embedding.ts) because OpenRouter's catalog does not publish it.
    */
   openrouterEmbeddingModel: process.env["OPENROUTER_EMBEDDING_MODEL"] ?? "nvidia/nemotron-3.5-embed-1b:free",
+  /** Optional secondary/fallback embedding model for free-tier use. */
+  openrouterEmbeddingModelFallback: (process.env["OPENROUTER_EMBEDDING_MODEL_FALLBACK"] ?? "").trim() || null,
 
   /** Generative LLM — runtime-dependent (local qwen3:4b vs hosted OpenRouter model). */
   get llmModel(): string {
@@ -92,6 +94,10 @@ export const aiConfig = {
   /** Embedding model — runtime-dependent (local Qwen3-0.6B vs hosted OpenRouter model). */
   get embeddingModel(): string {
     return this.runtime === "OPENROUTER" ? this.openrouterEmbeddingModel : process.env["AI_EMBEDDING_MODEL"] ?? "qwen3-embedding:0.6b";
+  },
+  /** Fallback embedding model (OpenRouter only). */
+  get embeddingModelFallback(): string | null {
+    return this.runtime === "OPENROUTER" ? this.openrouterEmbeddingModelFallback : null;
   },
   /** Quantization label, informational — recorded in status/logs. */
   quantization: process.env["AI_LLM_QUANTIZATION"] ?? "q4_K_M",

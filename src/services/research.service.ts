@@ -94,6 +94,12 @@ export async function startAnalysis(symbol: string, mode: "BUY" | "PORTFOLIO", q
 
 /** Poll one job's status/result. */
 export async function getAnalysisJob(jobId: string): Promise<AnalysisJobView> {
+  // Guard: never build /jobs/null (or /jobs/undefined) from a stale caller —
+  // a missing id is a programming error to fail fast locally, not a 400 from
+  // the backend. See ai-research-panel.tsx for the fixed poll lifecycle.
+  if (!jobId || jobId === "null" || jobId === "undefined") {
+    throw new Error("No analysis job id yet — cannot poll.");
+  }
   return apiRequest<AnalysisJobView>(`/ai/stock/jobs/${encodeURIComponent(jobId)}`);
 }
 

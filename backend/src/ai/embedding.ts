@@ -20,11 +20,20 @@ import { aiConfig } from "./config.js";
 
 export class EmbeddingError extends Error {
   readonly kind: "AUTH" | "RATE_LIMIT" | "UNAVAILABLE" | "SHAPE" | "SERVER";
+  readonly isDailyQuotaExhausted: boolean;
+  readonly retryAfterMs: number | null;
 
-  constructor(message: string, kind: "AUTH" | "RATE_LIMIT" | "UNAVAILABLE" | "SHAPE" | "SERVER" = "UNAVAILABLE") {
+  constructor(
+    message: string,
+    kind: "AUTH" | "RATE_LIMIT" | "UNAVAILABLE" | "SHAPE" | "SERVER" = "UNAVAILABLE",
+    isDailyQuotaExhausted = false,
+    retryAfterMs: number | null = null,
+  ) {
     super(message);
     this.name = "EmbeddingError";
     this.kind = kind;
+    this.isDailyQuotaExhausted = isDailyQuotaExhausted;
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -95,7 +104,7 @@ export async function requiredModelsPresent(): Promise<{ ok: boolean; missing: s
   if (!reachable) return { ok: false, missing: [aiConfig.llmModel, aiConfig.embeddingModel], models: [] };
   const has = (name: string) => models.some((m) => m === name || m.startsWith(`${name}:`));
   const missing = [aiConfig.embeddingModel, aiConfig.llmModel].filter((m) => !has(m));
-  return { ok: missing.length === 0, missing, models };
+  return { ok: missing.length === 0, missing, models: models };
 }
 
 /** Embed one text. Returns a vector normalised to unit length. */
@@ -138,16 +147,59 @@ async function ollamaEmbed(trimmed: string[]): Promise<number[][]> {
   return embeddings;
 }
 
-async function openrouterEmbed(trimmed: string[]): Promise<number[][]> {
-  const apiKey = aiConfig.openrouterApiKey;
-  if (!apiKey) throw new EmbeddingError("The hosted embedding provider is not configured on the server (OPENROUTER_API_KEY is missing).", "UNAVAILABLE");
+function classifyEmbeddingError(status: number, bodyText: string, headers?: Headers): EmbeddingError {
+  let detail = "";
+  try {
+    const body = JSON.parse(bodyText) as { error?: { message?: string; code?: number } | string };
+    if (typeof body.error === "string") {
+      detail = body.error;
+    } else if (body.error && typeof body.error === "object") {
+      detail = typeof body.error.message === "string" ? body.error.message : "";
+    }
+  } catch {
+    detail = bodyText.slice(0, 200);
+  }
+  const combined = (detail).toLowerCase();
+  const isDailyQuotaExhausted =
+    combined.includes("daily") ||
+    combined.includes("day limit") ||
+    combined.includes("quota") && combined.includes("exhaust") ||
+    combined.includes("credits exhausted") ||
+    combined.includes("account") && combined.includes("quota");
 
-  // Free-tier caps: a back-to-back batch loop crosses the per-minute limit.
-  // A bounded retry that honours the provider's Retry-After keeps a ~1-minute
-  // window recoverable without any unbounded loop that could burn the daily
-  // request budget (failed attempts also count against it).
+  const retryAfterHeader = headers?.get("Retry-After");
+  const retryAfterParsed = retryAfterHeader ? Number(retryAfterHeader) : NaN;
+  const retryAfterMs = Number.isFinite(retryAfterParsed) && retryAfterParsed > 0 ? retryAfterParsed * 1000 : null;
+
+  if (status === 401 || status === 403) {
+    return new EmbeddingError("OpenRouter rejected the server's API credentials (HTTP 4xx auth).", "AUTH");
+  }
+  if (status === 429 || status === 402) {
+    if (isDailyQuotaExhausted) {
+      return new EmbeddingError(
+        `OpenRouter free-tier embedding daily/quota exhausted (HTTP ${status}) — account-wide limit reached.`,
+        "RATE_LIMIT",
+        true,
+        retryAfterMs,
+      );
+    }
+    return new EmbeddingError(
+      `OpenRouter free-tier embedding quota or rate limit is exhausted (HTTP ${status}) — try again later.`,
+      "RATE_LIMIT",
+      false,
+      retryAfterMs,
+    );
+  }
+  if (status === 404) {
+    return new EmbeddingError(`OpenRouter cannot serve embedding model (HTTP 404 — set OPENROUTER_EMBEDDING_MODEL to an available model).`, "UNAVAILABLE");
+  }
+  return new EmbeddingError(`Embedding request failed (HTTP ${status}): ${bodyText.slice(0, 160)}`, "SERVER");
+}
+
+async function embedWithModel(model: string, apiKey: string, trimmed: string[]): Promise<number[][]> {
   const MAX_ATTEMPTS = 3;
   let lastError: EmbeddingError = new EmbeddingError("OpenRouter embedding request failed.", "SERVER");
+
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     let res: Response;
     try {
@@ -159,7 +211,7 @@ async function openrouterEmbed(trimmed: string[]): Promise<number[][]> {
           "HTTP-Referer": "https://portfolio-insights-ai-zeta.vercel.app",
           "X-Title": "PortfolioIQ",
         },
-        body: JSON.stringify({ model: aiConfig.openrouterEmbeddingModel, input: trimmed }),
+        body: JSON.stringify({ model, input: trimmed }),
         signal: AbortSignal.timeout(aiConfig.llmTimeoutMs),
       });
     } catch (err) {
@@ -167,23 +219,28 @@ async function openrouterEmbed(trimmed: string[]): Promise<number[][]> {
     }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      if (res.status === 401 || res.status === 403) {
-        throw new EmbeddingError("OpenRouter rejected the server's API credentials (HTTP 4xx auth).", "AUTH");
+      lastError = classifyEmbeddingError(res.status, body, res.headers);
+      if (lastError.kind === "AUTH" || lastError.kind === "UNAVAILABLE" || lastError.kind === "SHAPE") {
+        throw lastError;
       }
-      if (res.status === 429 || res.status === 402) {
-        lastError = new EmbeddingError(`OpenRouter free-tier embedding quota or rate limit is exhausted (HTTP ${res.status}) — try again later.`, "RATE_LIMIT");
-        const retryAfter = Number(res.headers.get("Retry-After"));
-        const waitMs = Math.min(30_000, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 12_000);
+      if (lastError.kind === "RATE_LIMIT") {
+        if (lastError.isDailyQuotaExhausted) {
+          // Don't retry on daily/account-wide quota exhaustion
+          throw lastError;
+        }
+        const waitMs = Math.min(30_000, lastError.retryAfterMs && lastError.retryAfterMs > 0 ? lastError.retryAfterMs : 12_000);
         if (attempt < MAX_ATTEMPTS) {
           await new Promise((r) => setTimeout(r, waitMs));
           continue;
         }
         throw lastError;
       }
-      if (res.status === 404) {
-        throw new EmbeddingError(`OpenRouter cannot serve embedding model ${aiConfig.openrouterEmbeddingModel} (HTTP 404 — set OPENROUTER_EMBEDDING_MODEL to an available model).`, "UNAVAILABLE");
+      // SERVER errors - retry once
+      if (attempt < MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
       }
-      throw new EmbeddingError(`Embedding request failed (HTTP ${res.status}): ${body.slice(0, 160)}`, "SERVER");
+      throw lastError;
     }
     const parsed = (await res.json()) as { data?: Array<{ embedding?: number[]; index?: number }>; error?: unknown };
     const data = parsed.data;
@@ -198,6 +255,48 @@ async function openrouterEmbed(trimmed: string[]): Promise<number[][]> {
     return ordered;
   }
   throw lastError;
+}
+
+async function openrouterEmbed(trimmed: string[]): Promise<number[][]> {
+  const apiKey = aiConfig.openrouterApiKey;
+  if (!apiKey) throw new EmbeddingError("The hosted embedding provider is not configured on the server (OPENROUTER_API_KEY is missing).", "UNAVAILABLE");
+
+  const primaryModel = aiConfig.openrouterEmbeddingModel;
+  const fallbackModel = aiConfig.embeddingModelFallback;
+
+  try {
+    return await embedWithModel(primaryModel, apiKey, trimmed);
+  } catch (err) {
+    if (!(err instanceof EmbeddingError)) throw err;
+    // Fallback policy — mirrors chat(): only for failures specific to the
+    // PRIMARY embedding model or its provider, never account-wide conditions:
+    //   - RATE_LIMIT (transient 429/402): a per-minute/per-provider limit; a
+    //     different model may still have headroom. Confirmed daily/account
+    //     quota exhaustion (isDailyQuotaExhausted) → NO fallback, NO retries.
+    //   - UNAVAILABLE (404 "model not found"): the configured model was delisted
+    //     or is not served to this account — model-specific, try the secondary.
+    //   - SERVER (persistent 5xx after in-call retries): provider fault on this
+    //     model's route.
+    // AUTH/SHAPE errors never trigger a cascade (a wrong key or wrong payload
+    // would fail identically on every model).
+    const fallbackEligible =
+      err.kind === "UNAVAILABLE" ||
+      err.kind === "SERVER" ||
+      (err.kind === "RATE_LIMIT" && !err.isDailyQuotaExhausted);
+    if (fallbackEligible && fallbackModel && fallbackModel !== primaryModel) {
+      try {
+        const waitMs = Math.min(
+          30_000,
+          err.kind === "RATE_LIMIT" && err.retryAfterMs && err.retryAfterMs > 0 ? err.retryAfterMs : 2_000,
+        );
+        await new Promise((r) => setTimeout(r, waitMs));
+        return await embedWithModel(fallbackModel, apiKey, trimmed);
+      } catch (fallbackErr) {
+        throw fallbackErr instanceof EmbeddingError ? fallbackErr : err;
+      }
+    }
+    throw err;
+  }
 }
 
 function normalise(vec: number[]): number[] {

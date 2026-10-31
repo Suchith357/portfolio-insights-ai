@@ -251,6 +251,29 @@ describe("OpenRouter chat()", () => {
     }
   });
 
+  test("empty generation on primary → one bounded fallback attempt succeeds", async () => {
+    const savedFallback = process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
+    process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = "nvidia/nemotron-3.5-lightning:free";
+    (aiConfig as any).openrouterModelFallback = "nvidia/nemotron-3.5-lightning:free";
+    try {
+      calls.length = 0;
+      installFetch(async (url, init) => {
+        const body = JSON.parse(String(init?.body)) as { model: string };
+        if (body.model === aiConfig.openrouterModel) {
+          return ok({ choices: [{ message: { content: "" }, finish_reason: "length" }] });
+        }
+        return ok({ choices: [{ message: { content: "{\"ok\":true}" }, finish_reason: "stop" }] });
+      });
+      const out = await chat("s", "u", { timeoutMs: 10_000 });
+      assert.equal(out, "{\"ok\":true}");
+      assert.equal(calls.length, 2, "primary EMPTY + one fallback success");
+    } finally {
+      if (savedFallback) process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = savedFallback;
+      else delete process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
+      (aiConfig as any).openrouterModelFallback = savedFallback && savedFallback.trim() ? savedFallback.trim() : "nvidia/nemotron-3.5-lightning:free";
+    }
+  });
+
   test("auth failure (401) never cascades to the fallback model", async () => {
     const savedFallback = process.env["OPENROUTER_LLM_MODEL_FALLBACK"];
     process.env["OPENROUTER_LLM_MODEL_FALLBACK"] = "google/gemma-4-26b-a4b-it:free";

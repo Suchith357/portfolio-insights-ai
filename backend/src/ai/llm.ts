@@ -247,10 +247,15 @@ async function chatOpenRouter(system: string, user: string, options: ChatOptions
     //     has no serving endpoint right now — model-specific, not an account cap.
     //   - SERVER (5xx from the upstream provider): transient provider fault on
     //     this model's route; a single secondary model is a bounded, sensible try.
-    // AUTH/CONFIG/TIMEOUT/NETWORK/EMPTY never trigger a model cascade.
+    //   - EMPTY (HTTP 200 but no usable content — e.g. a reasoning model whose
+    //     budget was consumed by hidden tokens under reasoning:{exclude}):
+    //     model-specific generation failure; one try on the secondary is the
+    //     bounded, honest recovery. Observed live on 2026-10-31.
+    // AUTH/CONFIG/TIMEOUT/NETWORK never trigger a model cascade.
     const fallbackEligible =
       err.kind === "UNAVAILABLE_MODEL" ||
       err.kind === "SERVER" ||
+      err.kind === "EMPTY" ||
       (err.kind === "RATE_LIMIT" && !err.isDailyQuotaExhausted);
     if (fallbackEligible && fallbackModel && fallbackModel !== primaryModel) {
       try {

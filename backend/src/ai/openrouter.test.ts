@@ -83,6 +83,17 @@ describe("AI config runtime auto-selection", () => {
     }
   });
 
+  test("chat fallback defaults to a non-Google FREE model (env-unset load)", () => {
+    // Loaded at module import with OPENROUTER_LLM_MODEL_FALLBACK unset in CI.
+    // A Google-hosted primary throttled by Google AI Studio needs a fallback on
+    // a DIFFERENT upstream provider — see config.ts.
+    const fallback = aiConfig.openrouterModelFallback;
+    assert.ok(fallback, "fallback default must be non-null");
+    assert.match(String(fallback), /:free$/);
+    assert.ok(!String(fallback).startsWith("google/"), "fallback must not share the primary's Google upstream");
+    assert.notEqual(fallback, aiConfig.openrouterModel);
+  });
+
   test("missing key under explicit OPENROUTER runtime is a config problem, not a crash", () => {
     process.env["AI_RUNTIME"] = "OPENROUTER";
     try {
@@ -122,18 +133,26 @@ describe("OpenRouter chat()", () => {
     installFetch(async () => jsonRes(401, JSON.stringify({ error: { message: "Invalid key (sk-or-v1-evil)", code: 401 } })));
     await assert.rejects(() => chat("s", "u", { timeoutMs: 2_000 }), (e: AiError) => e.kind === "AUTH");
 
+    // Disable the default fallback for this test so it measures ONLY the
+    // in-loop retry contract (config now ships a non-Google default fallback).
+    const savedFallback = (aiConfig as any).openrouterModelFallback;
+    (aiConfig as any).openrouterModelFallback = null;
     let attempts = 0;
     const t0 = Date.now();
-    installFetch(async () => {
-      attempts += 1;
-      return jsonRes(429, JSON.stringify({ error: { message: "Rate limit exceeded", code: 429 } }), { "Retry-After": "1" });
-    });
-    await assert.rejects(
-      () => chat("s", "u", { timeoutMs: 30_000 }),
-      (e: AiError) => e.kind === "RATE_LIMIT" && /rate limit|quota/i.test(e.message),
-    );
-    assert.equal(attempts, 2, "exactly one bounded retry on 429");
-    assert.ok(Date.now() - t0 >= 900, "Retry-After was honoured");
+    try {
+      installFetch(async () => {
+        attempts += 1;
+        return jsonRes(429, JSON.stringify({ error: { message: "Rate limit exceeded", code: 429 } }), { "Retry-After": "1" });
+      });
+      await assert.rejects(
+        () => chat("s", "u", { timeoutMs: 30_000 }),
+        (e: AiError) => e.kind === "RATE_LIMIT" && /rate limit|quota/i.test(e.message),
+      );
+      assert.equal(attempts, 2, "exactly one bounded retry on 429");
+      assert.ok(Date.now() - t0 >= 900, "Retry-After was honoured");
+    } finally {
+      (aiConfig as any).openrouterModelFallback = savedFallback;
+    }
   });
 
   test("404/no-endpoints → UNAVAILABLE_MODEL; 5xx → SERVER", async () => {

@@ -69,11 +69,19 @@ export const aiConfig = {
    */
   openrouterModel: process.env["OPENROUTER_LLM_MODEL"] ?? "google/gemma-4-31b-it:free",
   /**
-   * Optional secondary/fallback chat model for free-tier use. If the primary
-   * hits a transient 429, the client may retry with this model once before
-   * giving up. Leave unset to disable fallback.
+   * Secondary/fallback chat model for free-tier use.
+   *  - Explicit env OPENROUTER_LLM_MODEL_FALLBACK always wins.
+   *  - When unset, default to a verified FREE model on a DIFFERENT upstream
+   *    provider than the Google-hosted primary (google/gemma-4-31b-it:free):
+   *    upstream Google AI Studio throttling (429) that we observed in
+   *    production affects BOTH Google models, so a Google-to-Google fallback
+   *    cannot recover. nvidia/nemotron-3.5-lightning:free was verified present
+   *    in OpenRouter's free catalog (GET /api/v1/models?max_price=0) on
+   *    2026-10-31; NVIDIA upstream is independent of Google.
+   * Set OPENROUTER_LLM_MODEL_FALLBACK="" explicitly to disable fallback.
    */
-  openrouterModelFallback: (process.env["OPENROUTER_LLM_MODEL_FALLBACK"] ?? "").trim() || null,
+  openrouterModelFallback:
+    process.env["OPENROUTER_LLM_MODEL_FALLBACK"]?.trim() || "nvidia/nemotron-3.5-lightning:free",
   /**
    * Hosted embedding model for the RAG index/query pairs. FREE on OpenRouter
    * (pricing 0); output dimensionality is discovered from the first response

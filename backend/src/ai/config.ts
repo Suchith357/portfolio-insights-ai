@@ -113,7 +113,12 @@ export const aiConfig = {
   /** Generation parameters. Lower temperature keeps the model grounded. */
   contextLength: num("AI_LLM_CONTEXT_LENGTH", 4096, 512, 32_768),
   temperature: num("AI_LLM_TEMPERATURE", 0.2, 0, 1),
-  maxOutputTokens: num("AI_LLM_MAX_TOKENS", 1536, 64, 4096),
+  // Visible+reasoning budget for one completion. 1536 was too small for
+  // reasoning-capable free models: thinking consumed the whole budget and
+  // the response came back finish_reason "length" with empty content
+  // (observed live 2026-11-02). 4096 leaves ample room for the answer after
+  // the low reasoning effort cap (see llm.ts).
+  maxOutputTokens: num("AI_LLM_MAX_TOKENS", 4096, 64, 16384),
   /** Hard wall-clock budget for one LLM completion. */
   llmTimeoutMs: num("AI_LLM_TIMEOUT_MS", 90_000, 10_000, 300_000),
 

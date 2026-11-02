@@ -323,7 +323,10 @@ export async function analyzeStockDeep(input: {
     // 8192-token window (system ≈ 550 + prompt ≈ 1400 + output ≈ 2700 observed
     // ⇒ ~4.7k of 8192; 4B q4 + 8k KV ≈ 3.7 GB VRAM, fits a 6 GB GPU). A lower
     // cap truncates the JSON mid-object; a 240 s wall covers cold starts.
-    chat(RESEARCH_SYSTEM, prompt, { maxTokens: 3500, numCtx: 8192, temperature: 0.2, timeoutMs: 240_000 });
+    // 8192: reasoning tokens share this budget with the visible JSON report
+    // (reasoning.effort "low" caps thinking at ~20%); 3500 previously let
+    // thinking exhaust the budget → finish_reason "length" + empty content.
+    chat(RESEARCH_SYSTEM, prompt, { maxTokens: 8192, numCtx: 8192, temperature: 0.2, timeoutMs: 240_000 });
   try {
     // maxTokens 3500 caps the research JSON output. On OPENROUTER the default
     // free model's output cap (32768) is far larger, and numCtx is

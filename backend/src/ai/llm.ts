@@ -159,9 +159,14 @@ async function chatWithModel(
     temperature: options.temperature ?? aiConfig.temperature,
     // Output budget: same semantics as Ollama's num_predict.
     max_tokens: options.maxTokens ?? aiConfig.maxOutputTokens,
-    // Exclude hidden reasoning tokens so they never eat the output budget on
-    // reasoning-capable free models (supported via the `reasoning` parameter).
-    reasoning: { exclude: true },
+    // Reasoning control (OpenRouter docs: "Reasoning tokens and max_tokens"):
+    // reasoning tokens count against `max_tokens` on most providers, and a
+    // small budget consumed entirely by thinking returns finish_reason
+    // "length" with EMPTY content — exactly the production failure observed
+    // on 2026-11-02 (gemma-4-31b + nemotron-3.5-lightning). `effort: "low"`
+    // caps the reasoning share (~20% of the budget) while `exclude` keeps
+    // thinking text out of the visible answer.
+    reasoning: { exclude: true, effort: "low" },
   };
 
   const deadline = Date.now() + (options.timeoutMs ?? aiConfig.llmTimeoutMs);

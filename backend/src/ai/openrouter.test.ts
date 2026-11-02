@@ -116,10 +116,15 @@ describe("OpenRouter chat()", () => {
       const headers = new Headers(init?.headers as Record<string, string>);
       assert.equal(headers.get("authorization"), "Bearer sk-or-v1-testkey"); // ONLY from backend env
       assert.ok(headers.get("HTTP-Referer")?.startsWith("https://"));
-      const body = JSON.parse(String(init?.body)) as { model: string; stream: boolean; max_tokens: number; messages: Array<{ role: string }> };
+      const body = JSON.parse(String(init?.body)) as { model: string; stream: boolean; max_tokens: number; reasoning?: { exclude?: boolean; effort?: string }; messages: Array<{ role: string }> };
       assert.match(body.model, /:free$/);
       assert.equal(body.stream, false);
       assert.equal(body.max_tokens, 900); // option flows through
+      // Reasoning budget guard (production failure 2026-11-02): thinking must
+      // be capped so it cannot consume the whole max_tokens budget (which
+      // returned finish_reason "length" with empty content), and must never
+      // appear in the visible answer.
+      assert.deepEqual(body.reasoning, { exclude: true, effort: "low" });
       assert.deepEqual(body.messages.map((m) => m.role), ["system", "user"]);
       return ok({ choices: [{ message: { content: "  answer text  " }, finish_reason: "stop" }] });
     });
@@ -127,6 +132,16 @@ describe("OpenRouter chat()", () => {
     // Untrimmed by contract — downstream parsers handle surrounding whitespace
     // (same behaviour as the Ollama path; verified intact transport).
     assert.equal(out, "  answer text  ");
+  });
+
+  test("default output budget is the raised 4096 (not the old 1536)", async () => {
+    installFetch(async (url, init) => {
+      const body = JSON.parse(String(init?.body)) as { max_tokens: number };
+      assert.equal(body.max_tokens, 4096);
+      return ok({ choices: [{ message: { content: "ok" }, finish_reason: "stop" }] });
+    });
+    const out = await chat("s", "u", { timeoutMs: 5_000 });
+    assert.equal(out, "ok");
   });
 
   test("401 → AUTH; 429 honours Retry-After with a single bounded retry", async () => {

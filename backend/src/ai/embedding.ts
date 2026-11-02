@@ -17,6 +17,7 @@
  */
 
 import { aiConfig } from "./config.js";
+import { localEmbedMany } from "./local-embedding.js";
 
 export class EmbeddingError extends Error {
   readonly kind: "AUTH" | "RATE_LIMIT" | "UNAVAILABLE" | "SHAPE" | "SERVER";
@@ -119,8 +120,49 @@ export async function embedOne(text: string): Promise<number[]> {
 export async function embedMany(texts: string[]): Promise<number[][]> {
   if (texts.length === 0) return [];
   const trimmed = texts.map((t) => (t ?? "").slice(0, 8000));
-  const raw = aiConfig.runtime === "OPENROUTER" ? await openrouterEmbed(trimmed) : await ollamaEmbed(trimmed);
-  return raw.map(normalise);
+
+  if (aiConfig.runtime !== "OPENROUTER") {
+    return (await ollamaEmbed(trimmed)).map(normalise);
+  }
+
+  // Quota-free local space (see local-embedding.ts). Once active, every
+  // embed — index AND query — uses it, so the geometry always matches the
+  // stamped index; no further embedding HTTP requests are made at all.
+  if (aiConfig.embeddingProvider === "local") {
+    return localEmbedMany(trimmed);
+  }
+
+  try {
+    return (await openrouterEmbed(trimmed)).map(normalise);
+  } catch (err) {
+    if (err instanceof EmbeddingError && localFallbackEligible(err) && localFallbackConfigured()) {
+      aiConfig.switchEmbeddingProvider("local");
+      console.warn(
+        `[ai:embedding] hosted embedding unavailable (${err.kind}: ${err.message}) — switching to the LOCAL quota-free fallback (${"local/hash-bow-384"}, lexical, 384-d). ` +
+        `Retrieval keeps working without API quota; after hosted quota recovers, run POST /api/admin/ai/index/rebuild to restore semantic vectors.`,
+      );
+      return localEmbedMany(trimmed);
+    }
+    throw err;
+  }
+}
+
+/** Local fallback applies to quota/availability failures — never to a wrong
+ *  key or a malformed payload (those would fail identically everywhere and
+ *  must surface as configuration errors). */
+function localFallbackEligible(err: EmbeddingError): boolean {
+  return err.kind === "RATE_LIMIT" || err.kind === "UNAVAILABLE" || err.kind === "SERVER";
+}
+
+/** AI_EMBED_PROVIDER=hosted disables the fallback; =local never reaches here. */
+function localFallbackConfigured(): boolean {
+  const forced = (process.env["AI_EMBED_PROVIDER"] ?? "").trim().toLowerCase();
+  return forced === "" || forced === "auto";
+}
+
+/** Test seam: return to the hosted embedding space between tests. */
+export function __resetEmbeddingProviderForTest(): void {
+  aiConfig.switchEmbeddingProvider("hosted");
 }
 
 async function ollamaEmbed(trimmed: string[]): Promise<number[][]> {

@@ -51,6 +51,11 @@ function batchSpacingMs(): number {
 
 export async function rebuildIndex(limits = DEFAULT_LIMITS): Promise<IndexResult> {
   if (inFlight) return inFlight;
+  // Rebuilds re-probe the hosted embedding provider first (auto-recovery:
+  // once quota resets, the next rebuild restores semantic vectors with no
+  // env change). The probe costs at most one bounded request when quota is
+  // still exhausted — embedMany then falls back to the local space.
+  aiConfig.prepareEmbeddingProbe();
   inFlight = doRebuild(limits).finally(() => {
     inFlight = null;
   });
@@ -67,7 +72,17 @@ async function doRebuild(limits: typeof DEFAULT_LIMITS): Promise<IndexResult> {
     const documents = await buildDocuments(prisma, limits);
     const considered = documents.length;
     if (documents.length === 0) {
-      // Nothing to index (e.g. fresh DB): write an empty-but-valid store.
+      // Empty source must NEVER clear a valid index: preserve whatever is
+      // already stored (a transient empty read or a fresh query against a
+      // populated store must not destroy usable evidence). A truly fresh
+      // deployment (no index either) still gets an empty-but-valid store.
+      vectorStore.ensureLoaded();
+      if (vectorStore.size > 0) {
+        console.warn(
+          `[ai:indexer] source returned 0 documents — preserving the existing index (${vectorStore.size} docs) instead of clearing it.`,
+        );
+        return { ok: true, documentsIndexed: vectorStore.size, documentsConsidered: 0, skipped: 0, durationMs: Date.now() - started };
+      }
       vectorStore.replaceAll([], []);
       return { ok: true, documentsIndexed: 0, documentsConsidered: 0, skipped: 0, durationMs: Date.now() - started };
     }

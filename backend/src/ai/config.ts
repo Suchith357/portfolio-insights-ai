@@ -21,6 +21,7 @@ function bool(name: string, fallback: boolean): boolean {
 
 import path from "node:path";
 import fs from "node:fs";
+import { LOCAL_EMBED_MODEL, LOCAL_EMBED_DIM } from "./local-embedding.js";
 
 /**
  * Data directory for AI artifacts (FAISS index + metadata store).
@@ -88,6 +89,49 @@ export const aiConfig = {
    * (see embedding.ts) because OpenRouter's catalog does not publish it.
    */
   openrouterEmbeddingModel: process.env["OPENROUTER_EMBEDDING_MODEL"] ?? "nvidia/nemotron-3.5-embed-1b:free",
+
+  /** ------------------------------------------------------------------
+   * Embedding provider abstraction (quota-free local fallback).
+   *
+   * AI_EMBED_PROVIDER:
+   *   auto   (default) — hosted first; on embedding rate-limit / quota /
+   *          model-unavailable / provider-5xx errors switch this process to
+   *          the deterministic LOCAL embedder (no API quota, no network) and
+   *          keep serving retrieval. A rebuild re-probes the hosted provider
+   *          first, so semantic vectors return automatically after quota
+   *          recovery (no env change needed).
+   *   hosted — never use the local fallback (strict semantic-only mode).
+   *   local  — always local (no embedding HTTP at all).
+   * The active provider is stamped into the index geometry, surfaced by
+   * /api/ai/status, and can never be mixed with vectors of the other space.
+   */
+  _embeddingProvider: "hosted" as "hosted" | "local",
+  _hostedEmbeddingDim: null as number | null,
+  get embeddingProvider(): "hosted" | "local" {
+    const forced = (process.env["AI_EMBED_PROVIDER"] ?? "").trim().toLowerCase();
+    if (forced === "local") return "local";
+    if (forced === "hosted") return "hosted";
+    return this._embeddingProvider;
+  },
+  /** Switch the active embedding space (updates model id + dimensionality together). */
+  switchEmbeddingProvider(next: "hosted" | "local"): void {
+    if (next === this._embeddingProvider) return;
+    if (next === "local") {
+      this._hostedEmbeddingDim = this.embeddingDim;
+      this._embeddingProvider = "local";
+      this.embeddingDim = LOCAL_EMBED_DIM;
+    } else {
+      this._embeddingProvider = "hosted";
+      if (this._hostedEmbeddingDim !== null) this.embeddingDim = this._hostedEmbeddingDim;
+    }
+  },
+  /** Rebuilds re-probe the hosted provider first (auto-recovery after quota
+   *  reset) unless the operator forced AI_EMBED_PROVIDER=local/hosted. */
+  prepareEmbeddingProbe(): void {
+    const forced = (process.env["AI_EMBED_PROVIDER"] ?? "").trim().toLowerCase();
+    if (forced === "local" || forced === "hosted") return;
+    this.switchEmbeddingProvider("hosted");
+  },
   /** Optional secondary/fallback embedding model for free-tier use. */
   openrouterEmbeddingModelFallback: (process.env["OPENROUTER_EMBEDDING_MODEL_FALLBACK"] ?? "").trim() || null,
 
@@ -101,7 +145,10 @@ export const aiConfig = {
   },
   /** Embedding model — runtime-dependent (local Qwen3-0.6B vs hosted OpenRouter model). */
   get embeddingModel(): string {
-    return this.runtime === "OPENROUTER" ? this.openrouterEmbeddingModel : process.env["AI_EMBEDDING_MODEL"] ?? "qwen3-embedding:0.6b";
+    if (this.runtime === "OPENROUTER") {
+      return this.embeddingProvider === "local" ? LOCAL_EMBED_MODEL : this.openrouterEmbeddingModel;
+    }
+    return process.env["AI_EMBEDDING_MODEL"] ?? "qwen3-embedding:0.6b";
   },
   /** Fallback embedding model (OpenRouter only). */
   get embeddingModelFallback(): string | null {

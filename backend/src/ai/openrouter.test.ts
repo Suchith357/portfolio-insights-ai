@@ -23,7 +23,8 @@ import path from "node:path";
 process.env["AI_DATA_DIR"] = fs.mkdtempSync(path.join(os.tmpdir(), "piq-or-test-"));
 
 import { chat, LlmError } from "./llm.js";
-import { embedMany, embedOne, EmbeddingError, probeServer, requiredModelsPresent, __clearProbeCacheForTest } from "./embedding.js";
+import { embedMany, embedOne, EmbeddingError, probeServer, requiredModelsPresent, __clearProbeCacheForTest, __resetEmbeddingProviderForTest } from "./embedding.js";
+import { LOCAL_EMBED_DIM } from "./local-embedding.js";
 import { aiConfig, validateAiConfig } from "./config.js";
 
 /** Structural view of the typed provider errors (avoids value-as-type refs). */
@@ -357,25 +358,39 @@ describe("OpenRouter embeddings", () => {
   });
 
   test("embeddings auth/quota/model/shape failures map to typed errors", async () => {
-    installFetch(async () => jsonRes(401, "{}"));
-    await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "AUTH");
-    calls.length = 0;
-    installFetch(async () => jsonRes(429, JSON.stringify({ error: { message: "Rate limit exceeded" } }), { "Retry-After": "1" }));
-    await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "RATE_LIMIT");
-    installFetch(async () => jsonRes(404, "{}"));
-    await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "UNAVAILABLE");
-    installFetch(async () => ok({ data: [{}] }));
-    await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "SHAPE");
+    // Strict hosted mode: the typed errors must surface (the local fallback
+    // is exercised separately below).
+    process.env["AI_EMBED_PROVIDER"] = "hosted";
+    try {
+      installFetch(async () => jsonRes(401, "{}"));
+      await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "AUTH");
+      calls.length = 0;
+      installFetch(async () => jsonRes(429, JSON.stringify({ error: { message: "Rate limit exceeded" } }), { "Retry-After": "1" }));
+      await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "RATE_LIMIT");
+      installFetch(async () => jsonRes(404, "{}"));
+      await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "UNAVAILABLE");
+      installFetch(async () => ok({ data: [{}] }));
+      await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "SHAPE");
+    } finally {
+      delete process.env["AI_EMBED_PROVIDER"];
+    }
   });
 
   test("embedding 429 respects Retry-After and stops on daily/quota exhaustion", async () => {
-    calls.length = 0;
-    installFetch(async () => jsonRes(429, JSON.stringify({ error: { message: "Daily quota exceeded for this account" } }), { "Retry-After": "5" }));
-    await assert.rejects(
-      () => embedMany(["x"]),
-      (e: any) => e.kind === "RATE_LIMIT" && e.isDailyQuotaExhausted === true,
-    );
-    assert.equal(calls.length, 1, "should not retry on daily/quota exhaustion");
+    // Strict hosted mode: the typed error surfaces with exactly ONE request
+    // (no retry storm against an exhausted quota).
+    process.env["AI_EMBED_PROVIDER"] = "hosted";
+    try {
+      calls.length = 0;
+      installFetch(async () => jsonRes(429, JSON.stringify({ error: { message: "Daily quota exceeded for this account" } }), { "Retry-After": "5" }));
+      await assert.rejects(
+        () => embedMany(["x"]),
+        (e: any) => e.kind === "RATE_LIMIT" && e.isDailyQuotaExhausted === true,
+      );
+      assert.equal(calls.length, 1, "should not retry on daily/quota exhaustion");
+    } finally {
+      delete process.env["AI_EMBED_PROVIDER"];
+    }
   });
 
   test("embedding falls back to secondary model on transient 429 if configured", async () => {
@@ -403,6 +418,7 @@ describe("OpenRouter embeddings", () => {
 
   test("embedding model delisted (404) → single fallback attempt; no cascade when unconfigured", async () => {
     const saved = (aiConfig as any).openrouterEmbeddingModelFallback;
+    process.env["AI_EMBED_PROVIDER"] = "hosted"; // part 2 asserts the typed error (local fallback tested separately)
     try {
       // 1) With a secondary configured: one primary 404, one fallback success.
       (aiConfig as any).openrouterEmbeddingModelFallback = "backup-embed-model:free";
@@ -428,7 +444,71 @@ describe("OpenRouter embeddings", () => {
       );
       assert.equal(calls.length, 1);
     } finally {
+      delete process.env["AI_EMBED_PROVIDER"];
       (aiConfig as any).openrouterEmbeddingModelFallback = saved;
+    }
+  });
+});
+
+describe("OpenRouter embedding local fallback (quota-free)", () => {
+  after(() => __resetEmbeddingProviderForTest());
+
+  test("daily quota exhaustion → local fallback serves the batch with ONE request", async () => {
+    __resetEmbeddingProviderForTest();
+    try {
+      calls.length = 0;
+      installFetch(async () => jsonRes(429, JSON.stringify({ error: { message: "Daily quota exceeded for this account" } }), { "Retry-After": "5" }));
+      const out = await embedMany(["alpha", "beta"]);
+      assert.equal(out.length, 2);
+      assert.equal(out[0]?.length, LOCAL_EMBED_DIM);
+      assert.equal(calls.length, 1, "exhausted quota must not be retried");
+      assert.equal(aiConfig.embeddingProvider, "local");
+      // Follow-up embeds make NO provider HTTP calls at all.
+      const before = calls.length;
+      await embedOne("gamma");
+      assert.equal(calls.length, before, "local mode must not call the provider");
+    } finally {
+      __resetEmbeddingProviderForTest();
+    }
+  });
+
+  test("transient 429 after bounded retries → local fallback (no cascade)", async () => {
+    __resetEmbeddingProviderForTest();
+    try {
+      calls.length = 0;
+      installFetch(async () => jsonRes(429, JSON.stringify({ error: { message: "Rate limit exceeded" } }), { "Retry-After": "1" }));
+      const out = await embedMany(["x"]);
+      assert.equal(out[0]?.length, LOCAL_EMBED_DIM);
+      assert.equal(calls.length, 3, "bounded in-loop retries, then fallback");
+      assert.equal(aiConfig.embeddingProvider, "local");
+    } finally {
+      __resetEmbeddingProviderForTest();
+    }
+  });
+
+  test("AUTH failure never masks a config error behind the local fallback", async () => {
+    __resetEmbeddingProviderForTest();
+    try {
+      calls.length = 0;
+      installFetch(async () => jsonRes(401, JSON.stringify({ error: { message: "Invalid key", code: 401 } })));
+      await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "AUTH");
+      assert.equal(aiConfig.embeddingProvider, "hosted", "bad key must not switch spaces");
+    } finally {
+      __resetEmbeddingProviderForTest();
+    }
+  });
+
+  test("AI_EMBED_PROVIDER=hosted disables the fallback entirely", async () => {
+    __resetEmbeddingProviderForTest();
+    process.env["AI_EMBED_PROVIDER"] = "hosted";
+    try {
+      calls.length = 0;
+      installFetch(async () => jsonRes(429, JSON.stringify({ error: { message: "Daily quota exceeded" } })));
+      await assert.rejects(() => embedMany(["x"]), (e: AiError) => e.kind === "RATE_LIMIT");
+      assert.equal(aiConfig.embeddingProvider, "hosted");
+    } finally {
+      delete process.env["AI_EMBED_PROVIDER"];
+      __resetEmbeddingProviderForTest();
     }
   });
 });

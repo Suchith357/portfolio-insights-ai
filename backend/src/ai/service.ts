@@ -10,6 +10,7 @@
  */
 
 import { aiConfig, validateAiConfig } from "./config.js";
+import { LOCAL_EMBED_MODEL } from "./local-embedding.js";
 import { retrieve } from "./retriever.js";
 import { evaluateRetrieval, insufficientEvidenceResult } from "./grounding.js";
 import { buildPrompt, type PromptKind } from "./prompts.js";
@@ -164,6 +165,12 @@ export async function getStatus(): Promise<AiStatus> {
   } else {
     availability = "READY";
     detail = "AI module ready (retrieval + generation available).";
+  }
+  // Transparency: when the quota-free local embedding space is active, say
+  // so — operators must know retrieval is lexical (not semantic) and how to
+  // restore hosted vectors after quota recovery.
+  if (aiConfig.runtime === "OPENROUTER" && aiConfig.embeddingProvider === "local" && availability !== "DISABLED") {
+    detail += ` Embedding provider: LOCAL quota-free fallback (${LOCAL_EMBED_MODEL}, lexical, 384-d) — hosted embedding quota was unavailable; POST /api/admin/ai/index/rebuild restores semantic vectors once quota recovers.`;
   }
   return {
     availability,

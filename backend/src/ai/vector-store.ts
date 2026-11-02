@@ -104,6 +104,29 @@ export class VectorStore {
     if (this.index === null && this.exists) this.load();
   }
 
+  /**
+   * Re-validate the loaded index against the CURRENT runtime embedding
+   * geometry. Needed when the embedding provider can switch in-process
+   * (hosted quota exhaustion → local fallback): a query vector must never be
+   * searched against vectors from a different space. On mismatch the
+   * in-memory view is dropped — files on disk are PRESERVED — so the normal
+   * rebuild path (ensureIndexReady) can atomically replace them. An empty
+   * store is "compatible" (search safely returns nothing).
+   * Returns true when queries are safe in the active geometry.
+   */
+  ensureCompatibleWithRuntime(): boolean {
+    this.ensureLoaded();
+    if (!this.index || this.metadata.length === 0) return true;
+    if (this.geometryMatches()) return true;
+    console.warn(
+      `[ai:store] runtime embedding geometry changed (index=${this.stamp ? `${this.stamp.embeddingModel}/${this.stamp.embeddingDim}` : "untrusted"} → runtime=${aiConfig.embeddingModel}/${aiConfig.embeddingDim}) — preserving index files, dropping the in-memory view; rebuild required.`,
+    );
+    this.index = new faiss.IndexFlatIP(aiConfig.embeddingDim);
+    this.metadata = [];
+    this.stamp = null;
+    return false;
+  }
+
   /** Replace the entire store with the given documents + vectors (full rebuild). */
   replaceAll(documents: KnowledgeDocument[], vectors: number[][]): void {
     if (documents.length !== vectors.length) throw new Error("document/vector count mismatch");

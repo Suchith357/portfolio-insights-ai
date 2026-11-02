@@ -10,6 +10,7 @@
 import { aiConfig } from "./config.js";
 import { embedOne, EmbeddingError } from "./embedding.js";
 import { vectorStore } from "./vector-store.js";
+import { ensureIndexReady } from "./indexer.js";
 import type { RetrievedEvidence, DocumentType } from "./types.js";
 
 export interface RetrieveOptions {
@@ -46,6 +47,48 @@ export async function retrieve(query: string, options: RetrieveOptions = {}): Pr
       failed: true,
       failureReason: err instanceof EmbeddingError ? err.message : "query embedding failed",
     };
+  }
+
+  // The embedding space can change mid-request (hosted quota exhaustion →
+  // local fallback, or an admin switch back). Never search a query vector
+  // against a mismatched index: rebuild in the ACTIVE geometry instead,
+  // then re-embed the query so vector and index always share one space.
+  if (!vectorStore.ensureCompatibleWithRuntime()) {
+    if (aiConfig.runtime !== "OPENROUTER") {
+      return {
+        evidence: [],
+        retrievalMs: Date.now() - started,
+        failed: true,
+        failureReason: "knowledge index geometry does not match the active embedding model — an administrator must rebuild it (POST /api/admin/ai/index/rebuild).",
+      };
+    }
+    const ensured = await ensureIndexReady();
+    if (!ensured.ok) {
+      return {
+        evidence: [],
+        retrievalMs: Date.now() - started,
+        failed: true,
+        failureReason: `knowledge index could not be rebuilt in the active embedding space: ${ensured.reason ?? "unknown error"}`,
+      };
+    }
+    try {
+      queryVector = await embedOne(query);
+    } catch (err) {
+      return {
+        evidence: [],
+        retrievalMs: Date.now() - started,
+        failed: true,
+        failureReason: err instanceof EmbeddingError ? err.message : "query embedding failed",
+      };
+    }
+    if (!vectorStore.ensureCompatibleWithRuntime()) {
+      return {
+        evidence: [],
+        retrievalMs: Date.now() - started,
+        failed: true,
+        failureReason: "embedding geometry changed again during rebuild — please retry.",
+      };
+    }
   }
 
   // Over-fetch so metadata filtering can still fill topK.

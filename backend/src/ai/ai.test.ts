@@ -169,6 +169,46 @@ describe("Vector store (FAISS)", () => {
   });
 });
 
+// ------------------------------------------------- index rebuild safety
+describe("Index rebuild safety", () => {
+  test("a rebuild that cannot produce embeddings preserves the valid index", async () => {
+    const { vectorStore } = await import("./vector-store.js");
+    const { rebuildIndex } = await import("./indexer.js");
+    // Deterministic failure: OPENROUTER runtime without a key can never embed
+    // (the local fallback is disabled here), no matter what is installed on
+    // the machine or whether a local database is reachable.
+    const savedRuntime = process.env["AI_RUNTIME"];
+    const savedProvider = process.env["AI_EMBED_PROVIDER"];
+    process.env["AI_RUNTIME"] = "OPENROUTER";
+    process.env["AI_EMBED_PROVIDER"] = "hosted";
+    try {
+      const unit = new Array<number>(aiConfig.embeddingDim).fill(0);
+      unit[0] = 1;
+      vectorStore.replaceAll(
+        [{ meta: { documentId: "KEEP:1", documentType: "NEWS" as const, source: "s", indexedAt: null }, title: "Keep", content: "must survive a failed rebuild" }],
+        [unit],
+      );
+      const beforeMeta = fs.readFileSync(aiConfig.metadataPath, "utf8");
+      const result = await rebuildIndex();
+      // Either the rebuild failed outright (no provider) or it saw an empty
+      // source — BOTH must leave the existing valid index untouched.
+      assert.ok(
+        result.ok === false || result.documentsConsidered === 0,
+        "a rebuild must never succeed with unembeddable documents",
+      );
+      assert.equal(vectorStore.size, 1, "the previous valid index must survive");
+      assert.equal(fs.readFileSync(aiConfig.metadataPath, "utf8"), beforeMeta, "index metadata untouched");
+      assert.ok(vectorStore.search(unit, 1).length > 0, "index must still answer queries");
+    } finally {
+      if (savedRuntime === undefined) delete process.env["AI_RUNTIME"];
+      else process.env["AI_RUNTIME"] = savedRuntime;
+      if (savedProvider === undefined) delete process.env["AI_EMBED_PROVIDER"];
+      else process.env["AI_EMBED_PROVIDER"] = savedProvider;
+      vectorStore.clearFiles();
+    }
+  });
+});
+
 // ----------------------------------------------------------- grounding
 describe("Grounding", () => {
   test("rejects when nothing is retrieved", () => {

@@ -1,0 +1,297 @@
+PORTFOLIOIQ — TECHNICAL HANDOVER (repository + PDF audit only; live site not inspected)
+Sources: GitHub Suchith357/portfolio-insights-ai (local clone, HEAD=66fcda2, branch main, 54 commits; origin/dev=42 commits)
+and supplied PDF "Database Systems Lab QP 8" (VIT B.Tech BCSE307L Database Systems, Fall 2026-27, Dr. Deepika J).
+Labels: VERIFIED = read from repo/code; HISTORICAL = older commit; INFERRED = evidence-based deduction; UNKNOWN = not establishable.
+
+1. PROJECT OVERVIEW
+- Name: PortfolioIQ (README header "Portfolio Insights AI"). Objective: evidence-based portfolio intelligence — real market
+  data, quantitative risk, news-event intelligence, and grounded AI explanations; BUY/HOLD/AVOID from a deterministic engine,
+  never LLM-computed numbers (VERIFIED, README.md + PROJECT_DETAILS.txt).
+- Users: DIY Indian-market investors (NSE symbols, Rs., NIFTY 50 `^NSEI` benchmark) + academic DB project (INFERRED from seed
+  universe of 38 NSE stocks, docs, PDF course context).
+- Problem: retail trackers show value/allocation but not WHY risk exists, how news maps to one's holdings, or whether a stock
+  fits one's portfolio (VERIFIED, PROJECT_DETAILS.txt Section 1).
+- Core features/status (all VERIFIED in code): multi-portfolio CRUD + holdings + append-only transaction ledger + watchlist;
+  Yahoo Finance primary / Alpha Vantage fallback sync (45-min scheduler); risk engine (vol, Sharpe/Sortino/Calmar, VaR/CVaR,
+  HHI, Euler contributions, Beta/Alpha vs NIFTY); GDELT/Marketaux news -> entities -> events -> exposure -> alerts; RAG +
+  local LLM AI layer; AI Deep Analysis with decision engine; JWT auth, RBAC, audit log, rate limiting, Docker Compose.
+- PDF requirements: see section 16.
+
+2. REPOSITORY STRUCTURE (VERIFIED)
+- Root = frontend: package.json (name "tanstack_start_ts"), vite.config.ts (Lovable preset; dev proxy /api -> http://localhost:4000),
+  prisma.config.ts (schema: "backend/prisma/schema.prisma"; comments warn root prisma/schema.prisma is a STALE introspection —
+  never use), docker-compose.yml, Dockerfile.frontend, README.md, PROJECT_DETAILS.txt (177 KB code-generated reference), docs/
+  (ARCHITECTURE, DATABASE, AI_RAG_FOUNDATION, AI_STOCK_RESEARCH, PROVIDERS_AND_AI_EVENTS, TESTING, DEMO_FLOW .md).
+- src/ frontend: routes/ (_app.dashboard, _app.portfolios.index/$id, _app.stocks.index/$symbol, _app.holdings.$id, _app.risk,
+  _app.intelligence, _app.alerts, _app.watchlist, _app.profile, _app.admin, login, register, index; routeTree.gen.ts generated);
+  services/ (api-client.ts + 13 feature services); components/{charts/charts.tsx, stock/ai-research-panel.tsx, ui, layout}.
+- backend/: package.json ("portfolioiq-backend"); src/{app.ts, server.ts, routes/(12 files), controllers/(13), services/
+  (~30 incl. market-providers/, news/, ai/), middleware/, utils/, ai/}; prisma/{schema.prisma (431 lines, 19 models),
+  seed.ts, sql/ (10 files)}; scripts/{run-migration.cjs, api-smoke.mjs, feature-smoke.mjs}; Dockerfile; data/ (AI index, gitignored).
+- Tests (8): backend/src/ai/{ai.test.ts, openrouter.test.ts, requirements.test.ts}, ai/research/research.test.ts,
+  services/news/{features23.test.ts, requirements-r1.test.ts}, services/ai/analysis-job.test.ts,
+  services/market-providers/macro.providers.test.ts.
+- Git: branch main ahead of origin/dev by 9 commits (all OpenRouter/Prisma-deploy fixes). Key commits (HISTORICAL):
+  d18cf54 template seed; 9a61298 "Added JWT auth & stock data"; b9347c3 "live market data and analytics hardening";
+  8d8b442 (2026-09-22) "Add AI intelligence and risk analysis features" = CREATES backend/src/ai/* (original Qwen/Ollama stack);
+  5336303 merge PR #1; aa2cbaf/16328f7/4390ac8/9e25726 Prisma deployment fixes; 82dda12 = last Ollama-only state;
+  8b051e9 (2026-10-30) "Migrate AI inference from local Ollama to OpenRouter hosted free models"; 7627967 embedding rate limits;
+  66fcda2 (HEAD) OpenRouter chat fallback. AGENTS.md: repo is Lovable-connected — never rewrite pushed history.
+
+3. TECHNOLOGY STACK (versions from package.json, VERIFIED)
+- Frontend: React 19.2.0, react-dom 19.2.0, TypeScript 5.8.3, Vite 8.1.5, @tanstack/react-start ^1.169.3, react-router
+  ^1.170.45, react-query ^5.101.1, Tailwind CSS 4.2.1, recharts 2.15.4, react-hook-form ^7.71.2 + zod ^3.25.76, Radix UI,
+  sonner 2.0.7, lucide-react 0.575.0, date-fns ^4.1.0, nitro 3.0.260603-beta (SSR), ESLint 9 + Prettier.
+- Backend: Node (Docker node:22-bookworm-slim; local runs observed on Node v24.14.1 — no engines field, exact engine UNKNOWN),
+  Express 5.2.1, @prisma/client + prisma ^6.19.3, zod ^3.25.76, jsonwebtoken ^9.0.2, bcryptjs ^3.0.2, helmet ^8.1.0,
+  cors ^2.8.5, morgan ^1.10.1, dotenv ^17.4.2, faiss-node ^0.5.1, tsx ^4.20.6 (dev/test), native fetch (no axios).
+- DB: PostgreSQL (docs "14+"; docker-compose image postgres:16-alpine) via Prisma ORM; raw SQL via scripts/run-migration.cjs.
+- AI: local Ollama (qwen3:4b-instruct-2507-q4_K_M, qwen3-embedding:0.6b, 1024-dim, faiss-node IndexFlatIP); NEW hosted runtime
+  OpenRouter (default chat google/gemma-4-31b-it:free, embeddings nvidia/nemotron-3.5-embed-1b:free).
+- Tests/build: node:test via tsx; backend tsc (dist/); frontend vite build. No Jest/Vitest, no Redis, no message queue.
+
+4. SYSTEM ARCHITECTURE (VERIFIED; docs/ARCHITECTURE.md + code)
+ Browser (React 19 + TanStack Start SSR) --JWT--> /api --Vite proxy(dev)/same-origin(prod)--> Express 5 (backend/src/app.ts)
+   middleware: helmet -> cors(allow-list CORS_ORIGIN) -> morgan -> express.json{1mb} -> routers -> notFoundHandler -> errorHandler
+   routers -> requireAuth/requireRole + validate(Zod) + rate-limiters -> controllers (thin) -> services (business logic,
+   ownership checks, audit writes) -> Prisma singleton (utils/prisma.ts) -> PostgreSQL (19 tables + 1 procedure + 3 functions)
+ External: Yahoo/Alpha Vantage -> market-providers registry (ordered fallback, failure=data) -> market-data.sync -> stock_prices
+           GDELT/Marketaux -> news-registry -> news-ingest (dedup) -> entity-matcher -> event engine -> exposure -> alerts
+ AI:      queries -> ai/service.ts -> embed (Ollama /api/embed | OpenRouter /embeddings) -> FAISS IndexFlatIP -> grounding gate
+           -> prompts.ts (evidence [E1..En]) -> llm.ts chat (Ollama /api/chat | OpenRouter chat/completions) -> Zod output
+ LOCAL dev: all-in-one on machine, Postgres local/compose, Ollama on host (AI_OLLAMA_BASE_URL=http://127.0.0.1:11434; compose
+   uses http://host.docker.internal:11434 + extra_hosts host-gateway). DEPLOYED: frontend/backend containers (Dockerfiles);
+   actual Vercel/Render wiring not in repo (see section 14); no Ollama on server -> OPENROUTER runtime auto-selected.
+
+5. FRONTEND (VERIFIED)
+- Pages = src/routes/_app.*.tsx listed in section 2; login/register issue JWT stored at localStorage key "portfolioiq.token"
+  (src/services/api-client.ts). API_BASE_URL = VITE_API_BASE_URL ?? "/api"; responses enveloped {data, meta?} /
+  {error:{code,message,details?}}; ApiError carries backend message.
+- Flow: page -> TanStack Query mutation -> src/services/*.service.ts -> api-client fetch(+Bearer) -> Express route -> UI refetch.
+- Charts: recharts only (src/components/charts/charts.tsx: portfolio value, sector allocation, risk/drawdown, benchmark).
+- AI research UI: src/components/stock/ai-research-panel.tsx ("AI Deep Analysis" tab on _app.stocks.$symbol; runtime badge fed
+  by GET /api/ai/status); intelligence AI assessment panel in _app.intelligence.tsx; research.service.ts calls /api/ai/stock/*.
+
+6. BACKEND AND APIS (VERIFIED from route files; default all routes behind requireAuth JWT unless noted)
+- Mounts (app.ts): /api/auth, /api/users, /api/portfolios, /api/holdings, /api/transactions, /api/stocks, /api/watchlist,
+  /api/alerts, /api/analysis, /api/intelligence, /api/admin, /api/ai, /api/admin/ai; GET /api/health public.
+- Public: POST /api/auth/register (authLimiter, Zod), POST /api/auth/login (authLimiter); GET /api/auth/me authed.
+- Portfolio CRUD: GET/POST /api/portfolios, GET/PUT/PATCH/DELETE /api/portfolios/:id, GET :id/analysis, POST :id/analyze
+  (snapshot), POST :id/import (bulk holdings). Holdings: GET /, /portfolio/:id, /:id, DELETE /:id. Transactions: GET /,
+  GET filters, POST / (prisma.$transaction updates holding+ledger). Watchlist GET/POST/DELETE. Alerts: GET /, PATCH /:id/read,
+  PATCH /read-all. Users: GET/PATCH /api/users/me, PATCH /me/password (invalidates old JWTs via password_changed_at).
+- Analysis: GET /api/analysis/{overview,market-freshness,stock/:symbol,correlation/:symbol}; POST /buy-simulation,
+  /sell-simulation, /:id/refresh (calls stored procedure sp_refresh_portfolio_analysis).
+- Intelligence+risk (intelligence.routes.ts): GET portfolio/exposure, events/:id, summary, risk/{overview,attribution,
+  correlation,history,stress,benchmark,snapshots}, analogues/:eventId, performance/transactions, health-score;
+  POST scenarios/{analyze,compare,what-if}, events/:eventId/scenario, alerts/:id/read.
+- AI (ai.routes.ts): GET /api/ai/status; POST /api/ai/query (aiLimiter ~10/min); GET news/:symbol, events/:symbol,
+  portfolio-alerts; POST event/:eventId/analyze, stock/:symbol/analyze (async job: GET stock/jobs/:jobId, /jobs/latest,
+  /stock/resolve); ADMIN POST /api/admin/ai/index/rebuild, GET /api/admin/ai/index/status.
+- Admin (requireAdmin): GET stats/users/stocks/audit-logs/market-data/{status,providers}; POST market-data/sync,
+  intelligence/{news/fetch,news/cleanup,exposure/process,alerts/deliver}; GET intelligence news/event recent + status.
+- Startup/background (server.ts): startScheduler() = first run at +8 s then setInterval 45 min (MARKET_DATA_REFRESH_MINUTES);
+  startIntelligenceScheduler() = news ingest every NEWS_FETCH_INTERVAL_MINUTES (default 30, min 15) + cleanup every
+  NEWS_CLEANUP_INTERVAL_MINUTES (default 60); graceful SIGINT/SIGTERM shutdown stops timers + disconnects Prisma.
+- Errors: middleware/error.ts central handler, HttpError status/code, JSON {error:{code,message}}; no stack traces in production.
+
+7. ORIGINAL QWEN3-4B + OLLAMA IMPLEMENTATION (HISTORICAL; baseline = commit 8d8b442, intact through 82dda12; inspect with
+   `git show 82dda12:backend/src/ai/<file>`)
+- Exact models/config (backend/src/ai/config.ts at 82dda12 + backend/.env.example): AI_ENABLED=true; AI_RUNTIME=OLLAMA
+  (values OLLAMA|NONE then; OPENROUTER added later); AI_OLLAMA_BASE_URL default http://127.0.0.1:11434;
+  AI_LLM_MODEL default "qwen3:4b-instruct-2507-q4_K_M"; AI_EMBEDDING_MODEL default "qwen3-embedding:0.6b";
+  AI_LLM_QUANTIZATION=q4_K_M (info only); AI_LLM_CONTEXT_LENGTH=4096 (512..32768); AI_LLM_TEMPERATURE=0.2;
+  AI_LLM_MAX_TOKENS default 1536 in config (.env.example suggests 512); AI_LLM_TIMEOUT_MS=90000 (min 10000);
+  AI_RAG_TOP_K=6; AI_RAG_MIN_SCORE=0.35; AI_RAG_MAX_EVIDENCE_CHARS=6000; AI_DATA_DIR -> default backend/data/ai (gitignored).
+- Ollama setup (README/docs, HISTORICAL): user manually runs `ollama pull qwen3:4b-instruct-2507-q4_K_M`,
+  `ollama pull qwen3-embedding:0.6b`, `ollama serve`; the app NEVER starts Ollama. Readiness = GET {base}/api/tags
+  (probeServer, probeTimeoutMs) + requiredModelsPresent() checks both tags. Docker: Ollama stays on host (host.docker.internal).
+- Inference flow (llm.ts @82dda12): chat(system, user) -> POST {base}/api/chat, non-stream, body {model, messages[system,user],
+  stream:false, options:{temperature, num_ctx, num_predict}}, AbortSignal.timeout(90 s) -> parses message.content; typed
+  LlmError on timeout / unreachable / HTTP non-2xx / empty content; llmReady() = probeServer reachability.
+- Embeddings (embedding.ts @82dda12): POST {base}/api/embed {model, input:[<=8000-char chunks]} -> unit-normalised vectors
+  (L2 normalise => cosine via inner product); EmbeddingError wraps every failure; fixed 1024 dims.
+- Prompt/output: prompts.ts = system (evidence-grounded analyst) + rules (never calculate/predict, cite [E#], facts vs
+  interpretation) + pre-labelled authoritative numbers + evidence block (grounding.buildEvidenceBlock, numbered [E1..]) + user
+  question. Output: output-schema.ts extractJsonBlock() tolerates fenced JSON/trailing commas -> Zod structuredAnalysisSchema
+  {analysis, key_factors[], evidence[], confidence 0..1 default 0.3}; malformed output = structured error, never crash/store.
+- Why local vs cloud differs (VERIFIED from commit 8b051e9 message + code): Ollama exists only on the dev GPU machine; a
+  cloud backend (Render) has no server at 127.0.0.1:11434, so Deep Analysis failed with "local AI runtime unreachable".
+  Frontend message when unreachable: "Local AI unavailable — install/start Ollama…" and every other feature keeps working.
+
+8. AI RETRIEVAL AND KNOWLEDGE INDEX (VERIFIED)
+- Documents: backend/src/ai/document-builders.ts builds 5 deterministic types from tables: NEWS, EVENT, STOCK_INFORMATION,
+  FINANCIAL_INFORMATION, HISTORICAL_EVENT; indexer.ts embeds in batches (batch 64) into FAISS IndexFlatIP + documents.json sidecar.
+- Storage: faiss-node IndexFlatIP (inner product = cosine on normalised vectors); files documents.faiss + documents.json under
+  backend/data/ai (AI_DATA_DIR override); gitignored (*.faiss, backend/data/ai/). Metadata carries geometry stamp
+  {embeddingModel, embeddingDim}; vector-store.ts treats a mismatched/corrupt index as EMPTY (log "rebuild required") —
+  added so Ollama<->OpenRouter switches never search mixed vectors (8b051e9).
+- Original dims: fixed 1024 (Qwen3-Embedding-0.6B). Newer OpenRouter: dimension DISCOVERED from first embeddings response
+  (config comment: catalog hides dims) and stamped (8b051e9+). Retrieval: retrieve() top-K 6, minScore 0.35, evidence budget
+  6000 chars; research flow runs SIX targeted queries (research-retrieval.service.ts), merges, dedupes by documentId, reranks.
+- Grounding gate (grounding.ts): evaluateRetrieval -> if empty, or (top-3 aggregate < minScore*1.5 AND best < minScore+0.1)
+  => INSUFFICIENT, LLM IS NOT CALLED; buildEvidenceBlock injects numbered rows with source/provenance for [E#] citations.
+- Rebuild/persistence: admin POST /api/admin/ai/index/rebuild (single-flight, failure-cooled); ensureIndexReady() lazy
+  self-heal when index empty — ONLY on OPENROUTER runtime; OLLAMA keeps admin-built contract (missing index = UNAVAILABLE).
+  Startup: no automatic rebuild in server.ts; vectorStore.ensureLoaded() lazily on first use (restart resilience).
+- Differences original vs new (HISTORICAL vs current): runtime auto-selection in config.ts — explicit AI_RUNTIME wins, else
+  OPENROUTER when OPENROUTER_API_KEY set, else OLLAMA (config.ts:45-53); embedding/client errors typed
+  (AUTH|RATE_LIMIT|UNAVAILABLE|SHAPE|SERVER, isDailyQuotaExhausted, retryAfterMs); Retry-After batching/spacing
+  (OPENROUTER_EMBED_SPACING_MS default 3500); fallback models (OPENROUTER_LLM_MODEL_FALLBACK / EMBEDDING_MODEL_FALLBACK on
+  transient 429 only). Decision engine, grounding, deterministic math unchanged. Key files: config.ts, llm.ts, embedding.ts,
+  vector-store.ts, indexer.ts + openrouter.test.ts.
+
+9. DATABASE AND PRISMA SCHEMA (VERIFIED: backend/prisma/schema.prisma 431 lines)
+- Provider: postgresql, url = env("DATABASE_URL"). 19 models: users, portfolios, stocks, holdings, transactions, stock_prices,
+  watchlists, alerts, portfolio_analysis, benchmarks, benchmark_prices, portfolio_risk_snapshots, market_data_syncs,
+  audit_logs, intelligence_news_articles, intelligence_news_entities, intelligence_news_events, intelligence_event_entities,
+  intelligence_portfolio_impacts. (root prisma/schema.prisma = stale 10-model introspection; prisma.config.ts points to backend.)
+- Keys/limits (VERIFIED @@unique/@@index): stocks UNIQUE(symbol,exchange); holdings UNIQUE(portfolio_id,stock_id);
+  stock_prices UNIQUE(stock_id,price_date)  [NOTE: docs/DATABASE.md claims (stock_id,price_date,data_source) — schema+SQL say
+  (stock_id,price_date): doc discrepancy]; watchlists UNIQUE(user_id,stock_id); benchmarks UNIQUE(symbol,exchange);
+  benchmark_prices UNIQUE(benchmark_id,price_date); portfolio_risk_snapshots UNIQUE(portfolio_id,snapshot_date,calculation_version);
+  intelligence_news_articles UNIQUE(provider,provider_article_id); alerts 4 indexes; 25 FKs (docs claim) with cascade:
+  portfolios/holdings/transactions/analysis/snapshots/impacts -> users/portfolios CASCADE; stocks->holdings/transactions
+  NoAction (held stock undeletable); news entities/event_entities/impacts stock_id SET NULL; alerts.event/impact SET NULL.
+  CHECK constraints, updated_at triggers (fn_set_updated_at), functions fn_latest_close/fn_portfolio_summary, view
+  v_portfolio_summary (documented; NO CREATE VIEW statement exists in tracked SQL — creation script UNKNOWN), stored procedure
+  sp_refresh_portfolio_analysis(int,date) in sql/2026_09_15_sp_refresh_portfolio_analysis.sql (append-only in-DB recompute).
+- Migrations: backend/prisma/sql/ 10 files (constraints.sql + 9 dated 2026_09_12..2026_09_16) applied per-file by
+  backend/scripts/run-migration.cjs (dollar-quote aware, uses PrismaClient). NO prisma/migrations directory has EVER been
+  committed (git log --all verified) => README's `npx prisma migrate deploy` has no tracked migrations (GAP; base tables
+  were likely created via `prisma db push` locally — INFERRED, not documented).
+- Seed: backend/prisma/seed.ts (npm run db:seed) — idempotent upserts, demo users user@portfolioiq.dev / admin@portfolioiq.dev,
+  passwords SEED_USER_PASSWORD/SEED_ADMIN_PASSWORD fallback demo1234/admin1234, bcrypt BCRYPT_ROUNDS; never deletes data.
+- Connections: local = DATABASE_URL in backend/.env (git-ignored; .env.example shows
+  postgresql://USERNAME:PASSWORD@localhost:5432/portfolioiq); compose builds URL to `db` service. No Neon string anywhere
+  in repo (grep VERIFIED) — a Neon DB would only swap DATABASE_URL (INFERRED).
+
+10. LOCAL DATABASE -> NEON MIGRATION (guidance only; nothing executed)
+- Engine/tools (VERIFIED): PostgreSQL + pg_dump/pg_restore (documented in docs/DATABASE.md) and Prisma for schema. Local DB =
+  the DATABASE_URL in backend/.env; identify its contents read-only via `psql "$DATABASE_URL" -c '\dt'` + per-table counts.
+- Safe order (FK dependency): users -> stocks -> portfolios -> benchmarks -> holdings -> transactions -> stock_prices ->
+  benchmark_prices -> watchlists -> portfolio_analysis -> portfolio_risk_snapshots -> market_data_syncs -> audit_logs ->
+  intelligence_news_articles -> intelligence_news_entities -> intelligence_news_events -> intelligence_event_entities ->
+  intelligence_portfolio_impacts -> alerts. Or bypass ordering entirely with `pg_dump -Fc` custom format (preserves PKs, FKs,
+  unique constraints, timestamps, JSON/JSONB, sequences + ownership) — recommended. If row-copying instead: preserve PK ids
+  explicitly, then `SELECT setval(pg_get_serial_sequence(...), max(id))` per serial table; resolve duplicates on the 9 unique
+  business keys with upsert/skip; Neon requires sslmode=require in DATABASE_URL.
+- Backup-first procedure (from docs/DATABASE.md): 1) `pg_dump -U portfolioiq -Fc portfolioiq > dump_$(date +%F).dump`;
+  2) test restore into a SEPARATE db (`createdb portfolioiq_restore_test; pg_restore ... --no-owner`); 3) migrate;
+  4) verify: table counts, PK/FK/orphan checks, sample joins, app smoke (`node scripts/api-smoke.mjs`); 5) keep dumps off-host.
+  After cutover: update DATABASE_URL (backend/.env and/or Render env), run `node scripts/run-migration.cjs` for any SQL not
+  yet applied, `npm run db:seed`. CANNOT be determined from repo alone: actual row counts, which local data is production,
+  Neon project/plan/credentials, and whether the live DB matches schema.prisma — UNKNOWN without DB access.
+
+11. PORTFOLIO ANALYTICS AND FINANCIAL CALCULATIONS (VERIFIED code; all deterministic unless marked AI)
+- services/analytics.service.ts: weeklyReturns, annualisedVolatility, maxDrawdown, correlation, riskBand, computeMetrics,
+  portfolioValueSeries, portfolioCorrelation, buildRiskProfiles, latestHomogeneousSegment (data_source sanity).
+- services/news/quantitative-risk.service.ts: loadAlignedSeries (730-day window), covarianceMatrix, matVec, concentration/HHI,
+  correlationStats, getRiskOverview (vol sqrt(w'Σw), VaR 95/99, CVaR, Beta/Alpha, drawdown path), performanceAttribution
+  (Euler component risk), rollingRisk (30-day window). benchmark-performance.service.ts: Beta, Jensen alpha, tracking error,
+  information ratio, capture ratios vs ^NSEI. transaction-performance.service.ts: realized/unrealized P&L, holding period,
+  turnover. health-score, market-anomaly, risk-snapshot services persist daily snapshots (risk-v1, idempotent unique key).
+- analysis.service.ts: analyzePortfolio(...persistSnapshot), simulateBuy/simulateSell, correlationWithPortfolio,
+  refreshPortfolioAnalysisViaProcedure -> CALL sp_refresh_portfolio_analysis.
+- Intelligence determinism: event-importance scoring weights (severity .30, directness .20, relevance .15, sources .15,
+  recency .10, category .10 — PROJECT_DETAILS; code VERIFIED to exist in event-importance.service.ts); alerts one-per-event
+  + 24 h cooldown + watchlist/sector capped at MEDIUM (alert-priority/alert-delivery services).
+- AI-generated interpretation ONLY inside ai/: decision-engine.service.ts (decision-engine-v1: BUY if score>=62 AND
+  confidence>=0.45 AND risk!=VERY_HIGH; AVOID if score<=42; evidence quality<0.30 => INSUFFICIENT_EVIDENCE; weights via
+  AI_DECISION_WEIGHTS CSV default 0.20,0.15,0.15,0.20,0.15,0.15) and LLM narrative (report-schema.ts); cached
+  AI_RESEARCH_CACHE_MINUTES (code default 60, .env.example says 45 — discrepancy VERIFIED).
+- No feature claimed beyond code/docs; e.g. no options/futures/mutual-funds anywhere (VERIFIED absent).
+
+12. MARKET DATA AND NEWS (VERIFIED)
+- Providers: market-providers/{yahoo.provider, alphavantage.provider, registry, fallback}.ts — Yahoo primary keyless
+  (query1.finance.yahoo.com chart + quoteSummary, cookie+crumb), Alpha Vantage fallback if ALPHA_VANTAGE_API_KEY set
+  (GLOBAL_QUOTE, TIME_SERIES_DAILY, OVERVIEW; free 25/day, 5/min); MarketDataResult {ok,data,provenance}|{ok:false,error} —
+  failure is data, never thrown; sanity validation (price>0, high>=low, OHLC range, no future dates) skips invalid rows;
+  upsert with data_source provenance; per-run rows in market_data_syncs (trigger STARTUP/SCHEDULED/MANUAL).
+- News: news/{gdelt.provider, marketaux.provider, rss.providers, news-registry, news-ingest}.ts — GDELT keyless primary,
+  Marketaux if NEWS_MARKETAUX_API_TOKEN set; dedup UNIQUE(provider, provider_article_id) pre-check (news-ingest.ts:226-264);
+  entity-matcher confidence tiers (VERY_HIGH..LOW); event-categoriser/lifecycle; portfolio-exposure (DIRECT_HOLDING/WATCHLIST/
+  SECTOR_...); raw articles TTL NEWS_RETENTION_HOURS=72; GDELT hardening vs shared-IP 429 (commit 32bc210).
+- Schedules (server.ts): market sync +8 s then 45 min; news ingest 30 min (min 15); cleanup 60 min; config names in
+  backend/src/utils/env.ts (NEWS_*, MARKET_DATA_REFRESH_MINUTES, ANOMALY_STD_DEV_THRESHOLD).
+
+13. AUTHENTICATION AND SECURITY (VERIFIED code/config)
+- JWT (jsonwebtoken, utils/jwt.ts) + bcryptjs (default 10 rounds); requireAuth verifies token, loads user role, rejects
+  tokens issued before users.password_changed_at; requireRole/requireAdmin RBAC (roles USER|ADMIN in single users table);
+  ownership checks in services (403 non-owner, 404 where existence would leak); password change rehashes + invalidates old JWTs.
+- Validation: Zod middleware validate() on body/params/query -> 400 VALIDATION_ERROR. Rate limits: authLimiter on
+  register/login, aiLimiter on AI POSTs. CORS allow-list from CORS_ORIGIN; helmet security headers; express.json limit 1mb.
+- Secrets: .env git-ignored (git ls-files: only backend/.env.example tracked — VERIFIED no .env committed); .gitignore also
+  excludes backend/data/ai/, *.faiss, logs; audit_logs are insert-only, never log passwords; OpenRouter key read only
+  server-side (Bearer header), never returned/logged (code VERIFIED).
+
+14. DEPLOYMENT AND ENVIRONMENT CONFIGURATION
+- VERIFIED in repo: docker-compose.yml (db postgres:16-alpine + backend + frontend, pg_isready healthcheck, named volume pgdata);
+  backend/Dockerfile (node:22-bookworm-slim, npm ci, npm run build, EXPOSE 4000, CMD node dist/src/server.js);
+  Dockerfile.frontend (npm ci, vite build --mode production, EXPOSE 3000, CMD node .output/server/index.mjs).
+- NOT in repo (VERIFIED absent): render.yaml, vercel.json, .github/workflows (no CI/CD), any Neon config. Vercel appears only as
+  HTTP-Referer "https://portfolio-insights-ai-zeta.vercel.app" in llm.ts:72 / embedding.ts:211 (OpenRouter app attribution) =>
+  INFERRED: frontend deployed on Vercel. Render mentioned only in commit 8b051e9 message ("failed on Render") => INFERRED:
+  backend on Render; exact build/start commands there UNKNOWN (repo suggests npm ci && npm run build && npm start in backend/,
+  plus DATABASE_URL/JWT_SECRET envs). Build/start for Docker above is VERIFIED.
+- Env-var NAMES (backend/.env.example + utils/env.ts): DATABASE_URL, JWT_SECRET, JWT_EXPIRES_IN, BCRYPT_ROUNDS, PORT, NODE_ENV,
+  CORS_ORIGIN, SEED_USER_PASSWORD, SEED_ADMIN_PASSWORD, MARKET_DATA_REFRESH_MINUTES, ALPHA_VANTAGE_API_KEY, NEWS_PROVIDER,
+  NEWS_MARKETAUX_API_TOKEN, NEWS_FETCH_INTERVAL_MINUTES, NEWS_CLEANUP_INTERVAL_MINUTES, NEWS_RETENTION_HOURS, NEWS_FETCH_LIMIT,
+  NEWS_PROVIDER_TIMEOUT_MS, AI_ENABLED, AI_RUNTIME, AI_OLLAMA_BASE_URL, AI_LLM_MODEL, AI_EMBEDDING_MODEL, AI_LLM_QUANTIZATION,
+  AI_LLM_CONTEXT_LENGTH, AI_LLM_TEMPERATURE, AI_LLM_MAX_TOKENS, AI_LLM_TIMEOUT_MS, AI_RAG_TOP_K, AI_RAG_MIN_SCORE,
+  AI_RAG_MAX_EVIDENCE_CHARS, AI_DATA_DIR, AI_DECISION_WEIGHTS, AI_RESEARCH_CACHE_MINUTES, OPENROUTER_API_KEY,
+  OPENROUTER_BASE_URL, OPENROUTER_LLM_MODEL(_FALLBACK), OPENROUTER_EMBEDDING_MODEL(_FALLBACK), OPENROUTER_EMBED_SPACING_MS;
+  root .env: POSTGRES_PASSWORD, JWT_SECRET, CORS_ORIGIN, ALPHA_VANTAGE_API_KEY, MARKETAUX_API_KEY, AI_OLLAMA_BASE_URL;
+  frontend: VITE_API_BASE_URL, VITE_USE_DEMO_DATA, NITRO_PRESET, API_BASE_URL. (Values omitted deliberately; defaults in
+  .env.example are placeholders.) Local run (README): backend `npm run dev` (:4000), frontend `npm run dev` (:8080 in docs;
+  Vite proxy -> :4000).
+
+15. TESTING AND KNOWN ISSUES
+- Commands: backend `npm run typecheck`, `npm run build`, `npm run test:ai` (ai.test.ts + openrouter.test.ts),
+  `npx tsx --test src/services/news/features23.test.ts`, `npx tsx --test src/ai/research/research.test.ts`; frontend `npm run build`.
+- Measured now (VERIFIED by running): features23 25/25 PASS; research 15/15 PASS; test:ai => 28 pass + openrouter.test.ts file
+  FAILS TO LOAD: esbuild TransformError at openrouter.test.ts:295:116 (syntax error `return jsonRes(...)) , {...})`) — the broken
+  line is in UNCOMMITTED working-tree edits (git status: M backend/.env.example, config.ts, embedding.ts, openrouter.test.ts,
+  mid-WIP by another editor); HEAD copy is valid (14 tests, not executed here). docs/TESTING.md "68/68" (2026-09-15) predates
+  openrouter.test.ts — stale; HEAD would total 82 tests (28+14+25+15, INFERRED not run).
+- Confirmed limitations (README/docs/PROJECT_DETAILS): AI needs Ollama (~4.5-5.3 GB VRAM) or OPENROUTER key; Alpha Vantage
+  25 req/day; historical portfolio value uses current-holdings view (no quantity history) — documented in sp_refresh SQL;
+  news sentiment is deterministic, not a forecast. Architectural debt (VERIFIED): no prisma/migrations committed; README
+  migrate deploy step therefore incomplete; root prisma/schema.prisma stale (guarded by prisma.config.ts); docs/schema
+  discrepancy on stock_prices unique key; AI_RESEARCH_CACHE_MINUTES default differs (60 code vs 45 docs); Dockerfiles never
+  build-tested on the dev machine (PROJECT_DETAILS states Docker not installed); no CI/CD; dev branch 9 commits behind main.
+
+16. PDF REQUIREMENTS AND PROJECT DELIVERABLES (PDF = VIT BCSE307L project brief)
+- Required: proposal (title, problem statement, objectives, scope, team, stack, deliverables, Gantt); ER diagram + relational
+  schema + data dictionary; >=4 primary entities, >=3 relationships, >=8 tables, every table PK/FK, constraints
+  (NOT NULL/UNIQUE/CHECK/DEFAULT), 3NF+, indexes; free RDBMS (PostgreSQL recommended, NoSQL discouraged) with min 8-10 tables,
+  CRUD, joins, aggregate queries, VIEWS, transactions, >=1 stored procedure, >=1 trigger, ORM for all DB access (raw SQL only
+  for advanced features — Prisma listed for Express); React/Express app with responsive UI, login page, dashboard, CRUD,
+  search, filtering, pagination, form validation, exception handling; auth (OAuth recommended; JWT allowed), login/logout/
+  token handling/user-info retrieval; RBAC >=2 roles with role-based menu/page/API access in ONE users table (Role column);
+  BCrypt/Argon2; ORM SQL-injection prevention; .env secrets (no hardcoded passwords/keys); pg_dump/pg_restore backup; GitHub
+  >=10 meaningful commits, >=2 branches (main+dev), README, .gitignore excluding secrets; free-cloud deployment + live URL;
+  bonus: CI/CD, Grafana/Prometheus, managed cloud DB, custom domain. Marks 30 + bonus 3.
+- Mapping (repo evidence): met/strong — PostgreSQL+Prisma ORM, 19 tables (>=8), 19 PKs/25 FKs/unique+CHECK+DEFAULT+indexes,
+  CRUD/joins/aggregates/transactions (prisma.$transaction), stored procedure + 7 triggers, JWT+bcrypt+RBAC (USER/ADMIN single
+  users table), .env excluded from git, main+dev branches with 54 commits, README, Docker, search/filter/pagination
+  (stocks querySchema page/pageSize), form validation (Zod), exception handling (central error handler).
+- NOT demonstrably in repo: ER diagram file (no .drawio/erd image found — ABSENT), formal data dictionary doc (PROJECT_DETAILS
+  Sec 4 partially serves, INFERRED), a SQL VIEW script (v_portfolio_summary documented but no CREATE VIEW tracked — UNKNOWN),
+  Gantt chart/team proposal doc (absent), CI/CD and monitoring (absent, bonus lost), OAuth (JWT used, allowed), live URL
+  (UNKNOWN — Vercel URL only inferred from OpenRouter Referer header).
+
+17. PRIORITIZED NEXT STEPS
+A. Validate original Qwen/Ollama implementation: `git show 82dda12:backend/src/ai/llm.ts` (+ config.ts, embedding.ts) and
+   `git show 8d8b442 --stat`; diff the migration: `git diff 82dda12..66fcda2 -- backend/src/ai`; locally run
+   `ollama pull qwen3:4b-instruct-2507-q4_K_M && ollama pull qwen3-embedding:0.6b && ollama serve`; set
+   `AI_RUNTIME=OLLAMA` in backend/.env; `curl http://127.0.0.1:11434/api/tags`; rebuild index
+   `POST /api/admin/ai/index/rebuild`; check `GET /api/ai/status`.
+B. Local->Neon prep: backup first (pg_dump -Fc + test restore, section 10); reconcile schema
+   (`npx prisma generate` from backend/; decide db push vs authoring real migrations); run run-migration.cjs SQL files against
+   Neon; set DATABASE_URL with sslmode=require; row-count + FK verification; do NOT delete local DB until verified.
+C. Resolve uncommitted WIP: the 4 modified files (backend/.env.example, src/ai/{config,embedding,openrouter.test}.ts) contain
+   a syntax error at openrouter.test.ts:295 breaking `npm run test:ai` — reconcile with whoever is editing; do not commit blind.
+D. Unresolved questions: exact Vercel/Render settings (build dirs, start cmds, env values) — not in repo; how base tables were
+   created (no migrations tracked); whether live DB matches schema.prisma; where v_portfolio_summary was created; whether the
+   PDF's ER diagram/Gantt/deliverable docs exist outside the repo; test-count truth at HEAD (run full suite after WIP settles).

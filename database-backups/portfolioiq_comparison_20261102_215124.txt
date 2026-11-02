@@ -1,0 +1,64 @@
+﻿==================================================
+PORTFOLIOIQ DATABASE BACKUP AND COMPARISON
+Started: 11/02/2026 21:51:24
+==================================================
+
+[1] CONNECTION TARGETS
+Local database: portfolioiq on localhost:5432
+Neon database:  neondb on ep-lucky-field-b4dxmanp-pooler.c-6.us-east-2.aws.neon.tech:5432
+
+[2] CHECK DATABASE ACCESS
+Local: portfolioiq | postgres | PostgreSQL 18.6 on x86_64-windows, compiled by msvc-19.44.35228, 64-bit
+Neon:  neondb | neondb_owner | PostgreSQL 18.6 (4e5fd08) on aarch64-unknown-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+
+[3] BACK UP LOCAL DATABASE
+Backup created: C:\Users\saisu\Desktop\portfolio-insights-ai\database-backups\portfolioiq_local_20261102_215124.dump
+Backup size: 0.93 MB
+Backup archive validation: PASSED
+
+[4] DATABASE OBJECT COUNTS
+LOCAL:
+  TABLES|19
+  VIEWS|1
+  FUNCTIONS|4
+  TRIGGERS|7
+NEON:
+  TABLES|19
+  VIEWS|1
+  FUNCTIONS|4
+  TRIGGERS|7
+
+[5] TABLE ROW COUNT COMPARISON
+Local public tables: 19
+Neon public tables:  19
+alerts                                     Local=2            Neon=2            SAME_COUNT
+audit_logs                                 Local=4            Neon=4            SAME_COUNT
+benchmark_prices                           Local=5            Neon=5            SAME_COUNT
+benchmarks                                 Local=1            Neon=1            SAME_COUNT
+holdings                                   Local=4            Neon=1            DIFFERENT_COUNT
+intelligence_event_entities                Local=1            Neon=5            DIFFERENT_COUNT
+intelligence_news_articles                 Local=6            Neon=5            DIFFERENT_COUNT
+intelligence_news_entities                 Local=4            Neon=1            DIFFERENT_COUNT
+intelligence_news_events                   Local=6            Neon=1            DIFFERENT_COUNT
+intelligence_portfolio_impacts             Local=6            Neon=4            DIFFERENT_COUNT
+market_data_syncs                          Local=4            Neon=3            DIFFERENT_COUNT
+portfolio_analysis                         Local=1            Neon=0            DIFFERENT_COUNT
+portfolio_risk_snapshots                   Local=6            Neon=1            DIFFERENT_COUNT
+portfolios                                 Local=5            Neon=2            DIFFERENT_COUNT
+stock_prices                               Local=2            Neon=8            DIFFERENT_COUNT
+stocks                                     Local=3            Neon=3            SAME_COUNT
+transactions                               Local=5            Neon=1            DIFFERENT_COUNT
+users                                      Local=3            Neon=3            SAME_COUNT
+watchlists                                 Local=9            Neon=6            DIFFERENT_COUNT
+
+[6] COMPARISON SUMMARY
+Same row count: 6
+Different row count: 13
+Local-only tables: 0
+Neon-only tables: 0
+
+[7] FILES CREATED
+Backup: C:\Users\saisu\Desktop\portfolio-insights-ai\database-backups\portfolioiq_local_20261102_215124.dump
+Report: C:\Users\saisu\Desktop\portfolio-insights-ai\database-backups\portfolioiq_comparison_20261102_215124.txt
+
+No database changes were made.

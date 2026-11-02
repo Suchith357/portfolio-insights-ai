@@ -1,0 +1,81 @@
+﻿==================================================
+PORTFOLIOIQ DATABASE DIAGNOSTIC
+Generated: 2026-11-02 21:49:47
+Project root: C:\Users\saisu\Desktop\portfolio-insights-ai
+READ-ONLY CHECKS ONLY; NO DATABASE CHANGES
+==================================================
+
+[1] POSTGRESQL TOOLS
+pg_dump.exe : pg_dump (PostgreSQL) 18.6
+pg_restore.exe : pg_restore (PostgreSQL) 18.6
+psql.exe : psql (PostgreSQL) 18.6
+pg_isready.exe : pg_isready (PostgreSQL) 18.6
+
+[2] LOCAL POSTGRESQL SERVER
+localhost:5432 - accepting connections
+
+[3] PRISMA SCHEMA
+Schema exists: C:\Users\saisu\Desktop\portfolio-insights-ai\backend\prisma\schema.prisma
+Provider setting: provider = "prisma-client-js"
+Provider setting: provider = "postgresql"
+Datasource URL setting exists.
+Prisma model count: 19
+Prisma enum count: 0
+
+SQL FILE INVENTORY
+backend\prisma\sql\2026_09_12_market_data_and_db_objects.sql | 8100 bytes
+backend\prisma\sql\2026_09_14_intelligence_news_foundation.sql | 8576 bytes
+backend\prisma\sql\2026_09_15_event_ai_analysis.sql | 565 bytes
+backend\prisma\sql\2026_09_15_intelligence_portfolio_impacts.sql | 5223 bytes
+backend\prisma\sql\2026_09_15_market_provider_provenance.sql | 1010 bytes
+backend\prisma\sql\2026_09_15_sp_refresh_portfolio_analysis.sql | 6286 bytes
+backend\prisma\sql\2026_09_15_stock_financials.sql | 1153 bytes
+backend\prisma\sql\2026_09_16_benchmarks_risk_snapshots.sql | 3684 bytes
+backend\prisma\sql\2026_09_16_intelligence_alerts_lifecycle.sql | 4578 bytes
+backend\prisma\sql\constraints.sql | 2781 bytes
+No backend/prisma/migrations directory found.
+
+[4] DATABASE CONFIGURATION (SAFE SUMMARY)
+C:\Users\saisu\Desktop\portfolio-insights-ai\.env : host=localhost; port=5432; database=portfolioiq
+C:\Users\saisu\Desktop\portfolio-insights-ai\backend\.env : host=localhost; port=5432; database=portfolioiq
+C:\Users\saisu\Desktop\portfolio-insights-ai\backend\.env.neon : host=ep-lucky-field-b4dxmanp-pooler.c-6.us-east-2.aws.neon.tech; port=default; database=neondb
+
+[5] LOCAL DATABASE ACCESS
+database_name | database_user |                             server_version                              
+---------------+---------------+-------------------------------------------------------------------------
+ portfolioiq   | postgres      | PostgreSQL 18.6 on x86_64-windows, compiled by msvc-19.44.35228, 64-bit
+(1 row)
+Local psql exit code: 0
+
+[6] NEON DATABASE ACCESS
+database_name | database_user |                                                     server_version                                                      
+---------------+---------------+-------------------------------------------------------------------------------------------------------------------------
+ neondb        | neondb_owner  | PostgreSQL 18.6 (4e5fd08) on aarch64-unknown-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit
+(1 row)
+Neon psql exit code: 0
+Existing Neon tables:
+schemaname |           tablename            
+------------+--------------------------------
+ public     | alerts
+ public     | audit_logs
+ public     | benchmark_prices
+ public     | benchmarks
+ public     | holdings
+ public     | intelligence_event_entities
+ public     | intelligence_news_articles
+ public     | intelligence_news_entities
+ public     | intelligence_news_events
+ public     | intelligence_portfolio_impacts
+ public     | market_data_syncs
+ public     | portfolio_analysis
+ public     | portfolio_risk_snapshots
+ public     | portfolios
+ public     | stock_prices
+ public     | stocks
+ public     | transactions
+ public     | users
+ public     | watchlists
+(19 rows)
+
+[7] REPORT
+Diagnostic report path: C:\Users\saisu\Desktop\portfolio-insights-ai\portfolioiq-db-diagnostic.txt

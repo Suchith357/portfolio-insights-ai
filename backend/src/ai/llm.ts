@@ -218,6 +218,14 @@ async function chatWithModel(
     const choice = parsed.choices?.[0];
     const content = typeof choice?.message?.content === "string" ? choice.message.content : "";
     if (content.trim().length === 0) {
+      // Server-side diagnostic: when reasoning tokens eat the whole output
+      // budget, finish_reason is "length" and usage confirms it (OpenRouter
+      // docs: subtract completion_tokens_details.reasoning_tokens from
+      // completion_tokens). Logged so Render shows WHY the response was empty.
+      const usage = (parsed as { usage?: { completion_tokens?: number; completion_tokens_details?: { reasoning_tokens?: number } } }).usage;
+      console.error(
+        `[ai:llm] empty generation — model: ${model} | finish_reason: ${choice?.finish_reason ?? "(missing)"} | completion_tokens: ${usage?.completion_tokens ?? "?"} | reasoning_tokens: ${usage?.completion_tokens_details?.reasoning_tokens ?? "?"}`,
+      );
       // content: null + finish_reason "length" means the response was truncated
       // by the output cap — must never be treated as a successful answer.
       throw new LlmError(
@@ -263,6 +271,7 @@ async function chatOpenRouter(system: string, user: string, options: ChatOptions
       err.kind === "EMPTY" ||
       (err.kind === "RATE_LIMIT" && !err.isDailyQuotaExhausted);
     if (fallbackEligible && fallbackModel && fallbackModel !== primaryModel) {
+      console.log(`[ai:llm] primary ${primaryModel} failed (${err.kind}) — single fallback attempt on ${fallbackModel}`);
       try {
         // Honour Retry-After before the fallback when a rate limit supplied one
         // (bounded so chat can never stall for minutes).

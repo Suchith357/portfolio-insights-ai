@@ -147,7 +147,7 @@ async function ollamaEmbed(trimmed: string[]): Promise<number[][]> {
   return embeddings;
 }
 
-function classifyEmbeddingError(status: number, bodyText: string, headers?: Headers): EmbeddingError {
+function classifyEmbeddingError(status: number, bodyText: string, headers?: Headers, model?: string): EmbeddingError {
   let detail = "";
   try {
     const body = JSON.parse(bodyText) as { error?: { message?: string; code?: number } | string };
@@ -175,6 +175,12 @@ function classifyEmbeddingError(status: number, bodyText: string, headers?: Head
     return new EmbeddingError("OpenRouter rejected the server's API credentials (HTTP 4xx auth).", "AUTH");
   }
   if (status === 429 || status === 402) {
+    // Server-side diagnostic only (never returned to clients): the provider's
+    // own wording + Retry-After are what distinguish a per-minute window from
+    // a daily/model/account quota stop — surfaced in Render logs.
+    console.error(
+      `[ai:embedding] provider HTTP ${status} — detail: ${detail.slice(0, 300) || "(empty body)"} | Retry-After: ${headers?.get("Retry-After") ?? "(none)"} | model: ${model ?? "?"}`,
+    );
     if (isDailyQuotaExhausted) {
       return new EmbeddingError(
         `OpenRouter free-tier embedding daily/quota exhausted (HTTP ${status}) — account-wide limit reached.`,
@@ -219,7 +225,7 @@ async function embedWithModel(model: string, apiKey: string, trimmed: string[]):
     }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      lastError = classifyEmbeddingError(res.status, body, res.headers);
+      lastError = classifyEmbeddingError(res.status, body, res.headers, model);
       if (lastError.kind === "AUTH" || lastError.kind === "UNAVAILABLE" || lastError.kind === "SHAPE") {
         throw lastError;
       }

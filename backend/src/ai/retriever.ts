@@ -35,7 +35,9 @@ export interface RetrievalResult {
 export async function retrieve(query: string, options: RetrieveOptions = {}): Promise<RetrievalResult> {
   const started = Date.now();
   const topK = Math.max(1, options.topK ?? aiConfig.topK);
-  const minScore = Math.min(1, Math.max(0, options.minScore ?? aiConfig.minScore));
+  // Default threshold is calibrated for the ACTIVE embedding space (the
+  // local hashed space uses a lower, separately calibrated floor).
+  const minScore = Math.min(1, Math.max(0, options.minScore ?? aiConfig.effectiveMinScore));
 
   let queryVector: number[];
   try {

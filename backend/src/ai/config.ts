@@ -172,6 +172,21 @@ export const aiConfig = {
   /** Retrieval tuning. */
   topK: num("AI_RAG_TOP_K", 6, 1, 25),
   minScore: num("AI_RAG_MIN_SCORE", 0.35, 0, 1),
+  /**
+   * Minimum relevance threshold for the ACTIVE embedding space.
+   * Semantic spaces (hosted neural embeddings, local Ollama Qwen) keep
+   * AI_RAG_MIN_SCORE (0.35). The quota-free local hashed space scores
+   * inherently lower cosine between a short question and a long document —
+   * calibrated against production-length finance documents: relevant pairs
+   * score ~0.13–0.34 while unrelated noise sits at ~0.00–0.14 (median 0.03)
+   * — so it uses its own floor, well above the noise median but below every   * observed relevant pair. Override with AI_RAG_MIN_SCORE_LOCAL.
+   */
+  get effectiveMinScore(): number {
+    if (this.runtime === "OPENROUTER" && this.embeddingProvider === "local") {
+      return num("AI_RAG_MIN_SCORE_LOCAL", 0.1, 0, 1);
+    }
+    return this.minScore;
+  },
   /** Max evidence characters passed to the LLM (keeps context bounded). */
   maxEvidenceChars: num("AI_RAG_MAX_EVIDENCE_CHARS", 6000, 500, 30_000),
 

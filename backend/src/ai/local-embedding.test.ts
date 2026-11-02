@@ -71,6 +71,31 @@ describe("local embedding fallback (hashing BoW)", () => {
     assert.ok(relatedScore > 0.15, `related score too weak: ${relatedScore.toFixed(3)}`);
   });
 
+  test("calibrated against production-length docs: relevant ≥ threshold, noise below", () => {
+    // Mirrors the calibration that set AI_RAG_MIN_SCORE_LOCAL=0.1: relevant
+    // pairs score ~0.13–0.34, unrelated noise ~0.00–0.14 (median 0.03).
+    const threshold = 0.1;
+    const stockDoc =
+      "RELIANCE — Reliance Industries Limited (symbol RELIANCE), NSE, sector Energy. PortfolioIQ tracks Reliance Industries Limited in the Energy sector, listed on NSE. Company description: Reliance Industries Limited engages in hydrocarbon exploration and production, petroleum refining and marketing, petrochemicals, advanced materials, renewable, financial services, retail, telecommunications and digital services. The company is the largest private-sector company in India by market capitalisation.";
+    const newsDoc =
+      "Reliance Industries Q2 Results: 2 Key Stocks in Focus After Strong Earnings Performance. Reliance Industries reported stronger quarterly earnings as margins in the refining business improved and the retail segment posted double-digit revenue growth. Jio Platforms added subscribers at a steady pace, while the petrochemicals division faced softer spreads. Analysts flagged weaker global demand and elevated crude price volatility as key risks to the outlook.";
+    const irrelevantDoc =
+      "Football world cup highlights: five goals scored in the final minute of extra time as the underdogs staged a remarkable comeback. Fans celebrated late into the night across the city with streets filled with cheering supporters.";
+    const relevantBest = (q: string) =>
+      Math.max(cosine(localEmbed(q), localEmbed(stockDoc)), cosine(localEmbed(q), localEmbed(newsDoc)));
+    for (const q of [
+      "What are the key risks for Reliance Industries?",
+      "Should I buy Reliance Industries stock?",
+      "What happened to Reliance Q2 earnings?",
+      "How is my Reliance portfolio position doing?",
+    ]) {
+      const score = relevantBest(q);
+      assert.ok(score >= threshold, `"${q}" should clear the local threshold: ${score.toFixed(3)}`);
+    }
+    const noise = cosine(localEmbed("Why did football fans celebrate last night?"), localEmbed(stockDoc));
+    assert.ok(noise < threshold, `unrelated query must stay below threshold: ${noise.toFixed(3)}`);
+  });
+
   test("batch preserves order and per-item geometry", () => {
     const batch = localEmbedMany(["alpha beta gamma", "delta epsilon", ""]);
     assert.equal(batch.length, 3);

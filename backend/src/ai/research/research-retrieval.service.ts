@@ -59,7 +59,13 @@ export async function retrieveResearchEvidence(symbol: string, companyName: stri
 
   for (const q of queries) {
     queriesRun.push(q.label);
-    const res = await retrieve(q.query, { topK: PER_QUERY_K, stockSymbol: q.stockSymbol, minScore: Math.max(0.2, aiConfig.minScore - 0.1) });
+    // Semantic spaces: the usual slightly-relaxed bar (0.25 by default).
+    // Local hashed space: its own calibrated floor (see config.effectiveMinScore).
+    const minScore =
+      aiConfig.embeddingProvider === "local"
+        ? aiConfig.effectiveMinScore
+        : Math.max(0.2, aiConfig.minScore - 0.1);
+    const res = await retrieve(q.query, { topK: PER_QUERY_K, stockSymbol: q.stockSymbol, minScore });
     for (const ev of res.evidence) {
       const prev = byId.get(ev.documentId);
       if (prev) {

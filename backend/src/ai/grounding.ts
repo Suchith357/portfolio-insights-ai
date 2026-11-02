@@ -20,7 +20,7 @@ export type GroundingDecision =
  *   - at least one document at/above the minimum similarity, AND
  *   - enough aggregate signal (sum of top scores) to suggest topical overlap.
  */
-export function evaluateRetrieval(evidence: RetrievedEvidence[], minScore = aiConfig.minScore): GroundingDecision {
+export function evaluateRetrieval(evidence: RetrievedEvidence[], minScore = aiConfig.effectiveMinScore): GroundingDecision {
   if (evidence.length === 0) {
     return {
       verdict: "INSUFFICIENT",
@@ -80,7 +80,7 @@ export function insufficientEvidenceResult(
     evidence,
     meta: {
       topK: aiConfig.topK,
-      minScore: aiConfig.minScore,
+      minScore: aiConfig.effectiveMinScore,
       retrievalMs,
       generationMs: null,
       model: aiConfig.llmModel,

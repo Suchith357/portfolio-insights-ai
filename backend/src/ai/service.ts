@@ -128,7 +128,7 @@ export async function query(input: QueryInput): Promise<GroundedQueryResult> {
 function meta(topK?: number, retrievalMs = 0) {
   return {
     topK: topK ?? aiConfig.topK,
-    minScore: aiConfig.minScore,
+    minScore: aiConfig.effectiveMinScore,
     retrievalMs,
     generationMs: null as number | null,
     model: aiConfig.llmModel,
